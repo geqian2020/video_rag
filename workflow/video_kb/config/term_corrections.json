@@ -1,0 +1,27 @@
+{
+  "_说明": "真正的 ASR 转写错误修正表。这里列出的词条会在清洗阶段被直接替换为正确文本。不要把内部俚语/产品代号放在这里——那些应该放进 glossary.json，不替换原文。",
+  "_match_type说明": {
+    "literal": "直接字符串替换，适用于中文误识别词（如“教准”→“校准”）",
+    "case_insensitive_word": "大小写不敏感、按词边界匹配的英文/拼音替换，避免把已经正确拼写的词（如 Wisby）里的子串误替换（如 wisb 是 Wisby 的子串）"
+  },
+  "corrections": [
+    {
+      "pattern": "教准",
+      "replacement": "校准",
+      "match_type": "literal",
+      "note": "ASR 将“校准”高频误识别为“教准”"
+    },
+    {
+      "pattern": "教人",
+      "replacement": "校准",
+      "match_type": "literal",
+      "note": "ASR 将“校准”误识别为“教人”（如“TX教人部分”应为“TX校准部分”）"
+    },
+    {
+      "pattern": "wisb",
+      "replacement": "Visby",
+      "match_type": "case_insensitive_word",
+      "note": "ASR 将产品代号 Visby 拼音化误识别为 wisb；大小写不敏感且按词边界匹配，避免误伤已经正确拼写的 Wisby"
+    }
+  ]
+}

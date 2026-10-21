@@ -1,0 +1,12 @@
+2026-08-21 14:35:04,157 [INFO] 找到 1 个 MP4 文件。
+2026-08-21 14:35:04,162 [INFO] 开始处理: C:\Users\eiealxi\OneDrive - Ericsson\Desktop\workflow\1524 & 15241 sharing  - TX calibration-20220527_130019-Meeting Recording.mp4
+2026-08-21 14:35:04,162 [INFO] 正在加载 Whisper 模型 'small' (CPU 模式)...
+2026-08-21 14:35:05,935 [INFO] 模型加载完成。
+2026-08-21 15:58:49,754 [INFO] 完成: C:\Users\eiealxi\OneDrive - Ericsson\Desktop\workflow\1524 & 15241 sharing  - TX calibration-20220527_130019-Meeting Recording.mp4 -> C:\Users\eiealxi\OneDrive - Ericsson\Desktop\workflow\1524 & 15241 sharing  - TX calibration-20220527_130019-Meeting Recording.md
+2026-08-21 15:58:49,763 [INFO] ============================================================
+2026-08-21 15:58:49,764 [INFO] 处理完成统计:
+2026-08-21 15:58:49,764 [INFO]   找到: 1
+2026-08-21 15:58:49,765 [INFO]   成功: 1
+2026-08-21 15:58:49,765 [INFO]   跳过: 0
+2026-08-21 15:58:49,765 [INFO]   失败: 0
+2026-08-21 15:58:49,766 [INFO] ============================================================

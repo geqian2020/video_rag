@@ -1,0 +1,7 @@
+openai-whisper==20250625
+torch==2.13.0
+
+# --- 知识库检索相关依赖 (video_kb) ---
+opencc-python-reimplemented==0.1.7
+sentence-transformers==6.1.0
+chromadb==1.5.9
