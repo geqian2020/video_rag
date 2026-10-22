@@ -1,0 +1,14 @@
+# Python 3.11/3.12；CPU torch 或适配驱动的 CUDA torch 由公司批准渠道安装。
+# 这是兼容范围，不是假定已验证的全平台 lock。验收后 pip freeze 固化环境。
+numpy>=1.26,<3
+sentence-transformers>=5.1,<6
+transformers>=4.51,<5
+torch>=2.6,<3
+qdrant-client>=1.15,<2
+jieba==0.42.1
+fastapi>=0.115,<1
+pydantic>=2.10,<3
+uvicorn>=0.34,<1
+httpx>=0.28,<1
+PyYAML>=6.0.2,<7
+filelock>=3.16,<4

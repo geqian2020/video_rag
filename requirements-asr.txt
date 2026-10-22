@@ -1,0 +1,4 @@
+# 可选：已有工作环境安装过 openai-whisper 时先复用，不重复建大模型环境。
+PyYAML>=6.0.2,<7
+pydantic>=2.10,<3
+openai-whisper==20250625

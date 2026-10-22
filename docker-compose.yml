@@ -1,0 +1,26 @@
+services:
+  api:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      RAG_API_KEY: "${RAG_API_KEY:?请在启动前设置 RAG_API_KEY}"
+      RAG_MODELS__EMBEDDING: /models/embedding
+      RAG_MODELS__RERANKER: /models/reranker
+      RAG_MODELS__OFFLINE: "true"
+      RAG_STORAGE__ROOT: /app/data/index
+    volumes:
+      - ./data:/app/data
+      - ./models:/models:ro
+      - ./config.yaml:/app/config.yaml:ro
+  ollama:
+    image: ollama/ollama:0.11.10
+    profiles: [enrich]
+    environment:
+      OLLAMA_NO_CLOUD: "1"
+    ports:
+      - "127.0.0.1:11434:11434"
+    volumes:
+      - ollama-models:/root/.ollama
+volumes:
+  ollama-models:

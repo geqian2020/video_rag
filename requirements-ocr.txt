@@ -1,0 +1,6 @@
+# 可选离线 OCR：固定适配器版本；wheel 自带小型 PP-OCRv4 ONNX 权重。
+# 不强制安装 RAG 的 torch/Whisper 或最新 rapidocr 3.x，不混用不同包的 API。
+PyYAML>=6.0.2,<7
+pydantic>=2.10,<3
+jieba==0.42.1
+rapidocr-onnxruntime==1.4.4

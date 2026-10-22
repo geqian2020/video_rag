@@ -1,0 +1,4 @@
+{"video_id":"demo/test-chain","start":0,"end":12,"text":"PC 软件负责调度整个测试流程。它按顺序发送测试命令，并收集测试结果。"}
+{"video_id":"demo/test-chain","start":12,"end":25,"text":"嵌入式 ET 软件负责调用 radio，并执行测试算法。radio 提供射频硬件能力。"}
+{"video_id":"demo/local-kb","start":0,"end":14,"text":"知识库使用 Qdrant 保存向量。关键词使用 jieba 分词，再通过 BM25 检索。"}
+{"video_id":"demo/local-kb","start":14,"end":28,"text":"向量结果和关键词结果使用 RRF 融合。融合后最多取三十条，再用交叉编码器重排到前五条。"}

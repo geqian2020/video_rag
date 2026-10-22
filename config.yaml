@@ -1,0 +1,54 @@
+models:
+  embedding: BAAI/bge-m3
+  embedding_revision: null  # 离线交付推荐填准备模型时使用的 commit SHA
+  reranker: BAAI/bge-reranker-v2-m3
+  reranker_revision: null
+  device: cpu
+  offline: true
+  batch_size: 8
+  max_tokens: 1024
+  rerank_tokens: 2048
+  query_prompt_name: null  # 换 Qwen3-Embedding 时改为 query
+chunking:
+  similarity_threshold: 0.65
+  min_seconds: 15
+  max_seconds: 90
+  gap_seconds: 10
+enrichment:
+  url: http://127.0.0.1:11434
+  model: qwen3:4b
+  timeout: 180
+  retries: 2
+  on_failure: fail
+storage:
+  root: data/index
+  qdrant_url: null
+  collection_prefix: video_rag
+retrieval:
+  recall_k: 30
+  top_k: 5
+  rrf_k: 60
+  bm25_k1: 1.5
+  bm25_b: 0.75
+allowed_hosts: [127.0.0.1, localhost, '::1']
+# 可选：只在构建词汇库和重新转录时使用，检索/API 无需安装 OCR/Whisper。
+ocr:
+  interval_seconds: 5
+  min_confidence: 0.7
+  min_frames: 2
+  crop: [0, 0, 1, 1]
+  upscale: 1.5
+  max_side: 2560
+  det_model: null  # null 复用 rapidocr-onnxruntime 包内的本地模型
+  rec_model: null
+  cls_model: null
+  rec_keys: null
+asr:
+  model: small  # 或 D:/approved-models/small.pt
+  model_cache: null
+  device: cpu
+  language: zh
+  window_seconds: 30
+  context_margin: 30
+  prompt_tokens: 180
+  max_terms: 30

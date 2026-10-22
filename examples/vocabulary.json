@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "entries": [
+    {"term": "Qdrant", "approved": true, "scope": "video", "video_id": "demo/local-kb", "timestamps": [0, 5, 10], "priority": 10, "aliases": [], "evidence": [{"kind": "manual", "note": "虚构样例：人工核对画面后的正确拼写"}]},
+    {"term": "BM25", "approved": true, "scope": "global", "video_id": null, "timestamps": [], "priority": 0, "aliases": [], "evidence": [{"kind": "manual", "note": "虚构样例：通用术语，明确批准跨视频提示"}]},
+    {"term": "Qdranl", "approved": false, "scope": "video", "video_id": "demo/local-kb", "timestamps": [5], "priority": 0, "aliases": [], "evidence": [{"kind": "manual", "note": "示意 OCR 错字；不得进入提示词"}]}
+  ]
+}
