@@ -1,6 +1,8 @@
-# 验证记录（含 OCR 辅助转录升级）
+# 验证记录
 
-- 当前验证环境：Linux x86_64、Python 3.12.14；未安装真实 Whisper、embedding、reranker 权重或 Ollama 服务。OCR 使用真实本地 RapidOCR 模型做了独立验证。
+## OCR/ASR 升级阶段（历史记录）
+
+- 该阶段验证环境：Linux x86_64、Python 3.12.14；未安装真实 Whisper、embedding、reranker 权重或 Ollama 服务。OCR 使用真实本地 RapidOCR 模型做了独立验证。
 - `python -m pytest -q`：**34 passed**，约 1.85 秒。Starlette 对其测试客户端使用 httpx 发出一条弃用提醒，不影响测试通过。
 - 编译、CLI --help、示例配置、转录与 gold 格式校验通过。
 - 原 RAG 使用真实 Qdrant embedded 完成 dense/sparse 写入、过滤、查询、替换索引、建库失败保护；语义模型为显式测试替身。
@@ -19,3 +21,7 @@
 尚未执行：真实 RAG/Whisper/Ollama 全链路、公司模糊画面的 OCR 质量、GPU、Windows、Docker build/compose、真实检索指标、公司工作台联调。部署前使用批准的完整权重跑 README 与 OCR_ASSISTED_ASR.md 的流程，记录准确依赖版本与模型 SHA。
 
 交付只包含通用源码、文档与虚构样例，不包含本地截图、词库、业务转录、旧 Chroma 数据库、下载的模型或测试环境；本次源码通过 GitHub 提交发布，不改写已有历史；发布结果以 main 提交记录为准。
+
+## 最新：公开语料测试升级
+
+新增 test/ 下载/字幕转换/CPU 基线和 eval.make_gold；扩展 eval.run_eval 的无答案、Hit、分组与逐题诊断。当前回归测试 **41 passed**（两条依赖弃用提醒）。另实际运行 4 个公开视频的完整字幕、624 块、60 道草稿题的真实轻量 embedding + cross-encoder 检索，详情见 ../test/CLOUD_RUN.md。这项真实推理区别于早期测试替身；默认生产模型与 OCR/Whisper 验收边界不变。

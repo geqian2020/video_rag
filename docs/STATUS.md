@@ -19,11 +19,11 @@
 | 原有仓库代码审查 | 完成 | REPOSITORY_REVIEW.md 记录分块、时间戳、ID、清洗与旧库问题 |
 | 新 RAG 通用代码 | 完成 | 分块、增强、dense/sparse、RRF、重排、API、评估与配置均有实现 |
 | OCR 词汇库与辅助转录代码 | 完成 | 新入口 ocr.extract、ocr.vocab、transcribe.run |
-| 自动化测试 | 已有 34 项通过记录 | 真实 Qdrant / ffmpeg；Whisper、embedding、reranker、Ollama 使用测试替身或请求模拟 |
+| 自动化测试 | 已有 41 项通过记录 | 真实 Qdrant / ffmpeg；Whisper、embedding、reranker、Ollama 使用测试替身或请求模拟 |
 | 真实本地 OCR 测试 | 通过清晰测试图验证 | 真实 RapidOCR 正确识别生成图中的英文术语，不代表公司视频质量 |
 | 文档与交付 | 完成 | 中文 README、OCR 操作、依赖、配置、示例、Docker 文件与验证记录 |
 | 公司视频专有名词效果 | 待验证 | 需代表性短视频、人工确认词表和校对参考文本 |
-| 真实模型全链路 | 待验证 | 需目标机已有 Whisper/BGE/reranker/Ollama 权重 |
+| 默认生产模型全链路 | 待验证 | 真实英文轻量检索基线已完成；Whisper/BGE-M3/Ollama 目标链路仍需验收 |
 | Windows / GPU / Docker | 待验证 | 已提供操作与配置，尚无对应运行验收记录 |
 | 公司聊天工作台联调 | 待完成 | 接入方后端需要调用 /search 并处理来源引用与上下文 |
 
@@ -40,3 +40,9 @@
 ## 数据范围
 
 本次提交新增通用代码、文档、配置及虚构示例，不提交本地截图、模型、生成词库、业务转录或测试环境。仓库原有 workflow 下已经跟踪的数据库/转录/日志没有在本次自动删除，历史数据排查见 REPOSITORY_REVIEW.md。
+
+## 公开语料云端试跑补充
+
+已新增 test/ 目录，核对 5 个长视频原网址；实际下载其中 4 个的英文字幕（4h51m03s），6322 段生成 624 块，60 道 agent_draft 题运行真实 BGE-small-en/MiniLM cross-encoder 基线。融合 Recall@30=87.50%，重排 Hit@5=77.08%，MRR@5=0.5028。12 道无答案题在无拒绝阈值时均返回结果。具体来源、对照实验与限制见 ../test/CLOUD_RUN.md。
+
+此次公开字幕检索已实际执行；公司视频/词库效果、默认 BGE-M3 全链路、人工确认 gold 和工作台端到端测试仍待完成。未将公开字幕测试说成视频 OCR/ASR 的验证。

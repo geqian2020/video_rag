@@ -35,6 +35,12 @@ OCR 错字不会自动入库；`canonical_term` 可人工改正，只有明确 a
 
 可选依赖分别是 `requirements-ocr.txt` 和 `requirements-asr.txt`，已有 Whisper/PyTorch 环境与本地权重先复用；单纯运行检索/API 不需要安装这些依赖。配有无词表/有词表的 CER、术语召回和额外术语对照评估。
 
+## 新增：公开 agent 视频测试
+
+[test/](test/README.md) 提供 5 个已核实为 1-2 小时的公开视频来源、下载/字幕转换、出题提示词和时间标签验证。云端已用其中 4 个视频的完整英文字幕跑真实轻量模型检索对照，结果与限制见 [云端测试记录](test/CLOUD_RUN.md)。媒体、真实评测题和完整转录不提交 Git。
+
+`eval.make_gold` 默认要求人工 reviewed；`eval.run_eval` 新增 Hit、无答案误接受、按题型/视频汇总和逐题诊断。阈值必须另用验证集标定。
+
 ## 快速开始
 
 推荐 Python 3.11 或 3.12。Windows 使用 PowerShell；无需安装 Docker。CPU 可运行但 BGE-M3 + reranker + Qwen 同时驻留会占用较多内存，先用小批量验证。GPU 使用公司批准的匹配驱动的 PyTorch，修改 `models.device: cuda`。实际速度与内存以本机验收为准。

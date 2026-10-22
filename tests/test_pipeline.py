@@ -158,7 +158,7 @@ def test_legacy_end_is_estimated():
 
 def test_eval_recall_and_mrr():
     gold = [{'chunk_id': 'a'}, {'chunk_id': 'b'}]
-    assert metrics([{'chunk_id': 'a'}] * 2, gold, 5) == {'recall': .5, 'mrr': 1}
+    assert metrics([{'chunk_id': 'a'}] * 2, gold, 5) == {'recall': .5, 'mrr': 1, 'hit': 1.0}
     assert metrics([{'chunk_id': 'x'}, {'chunk_id': 'b'}], gold, 5)['mrr'] == .5
 
 def test_api_auth_validation_contract(monkeypatch, cfg):

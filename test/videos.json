@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "purpose": "public_agent_development_benchmark",
+  "videos": [
+    {
+      "video_id": "xzRJOaqDMCg",
+      "url": "https://www.youtube.com/watch?v=xzRJOaqDMCg",
+      "title": "LangChain Tutorial for Beginners: Build Production-Ready AI Agents from Scratch in 99 Minutes",
+      "channel": "Zahiruddin Tavargere",
+      "duration_seconds": 5922,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "7WC12HHC55E",
+      "url": "https://www.youtube.com/watch?v=7WC12HHC55E",
+      "title": "1 Hour LangGraph Crash Course - From Zero To Hero - with Deep Search React Agent Project",
+      "channel": "Machine Learning With Hamza",
+      "duration_seconds": 3860,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "95XrWA6-UFM",
+      "url": "https://www.youtube.com/watch?v=95XrWA6-UFM",
+      "title": "Building Agentic and Multi-Agent Systems with LangGraph",
+      "channel": "Open Data Science and AI Conference",
+      "duration_seconds": 7167,
+      "language": "en",
+      "listed_caption_languages": [
+        "ar",
+        "bn",
+        "de-DE",
+        "en",
+        "fr-FR",
+        "hi",
+        "id",
+        "it",
+        "iw",
+        "ja",
+        "ko",
+        "ml",
+        "nl-NL",
+        "pl",
+        "pt-BR",
+        "ru",
+        "te",
+        "uk"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "kBXYFaZ0EN0",
+      "url": "https://www.youtube.com/watch?v=kBXYFaZ0EN0",
+      "title": "CrewAI Step-by-Step | Complete Course for Beginners",
+      "channel": "Alejandro AO",
+      "duration_seconds": 4063,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "s-jYxgKMqRc",
+      "url": "https://www.youtube.com/watch?v=s-jYxgKMqRc",
+      "title": "Master CrewAI: Your Ultimate Beginner's Guide!",
+      "channel": "Sam Witteveen",
+      "duration_seconds": 3618,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    }
+  ],
+  "alternates": [
+    {
+      "video_id": "uD3wjGy7YL0",
+      "url": "https://www.youtube.com/watch?v=uD3wjGy7YL0",
+      "title": "The MCP Course You Need",
+      "channel": "Kubesimplify",
+      "duration_seconds": 7188,
+      "language": "en",
+      "listed_caption_languages": [
+        "de-DE",
+        "en",
+        "es-US",
+        "fr-FR",
+        "hi",
+        "pt-BR"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22",
+      "cloud_subtitle_attempt": "HTTP 429; not included in this cloud run"
+    }
+  ]
+}

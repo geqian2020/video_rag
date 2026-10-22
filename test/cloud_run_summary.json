@@ -1,0 +1,321 @@
+{
+  "run_date": "2026-10-22",
+  "status": "provisional_agent_draft_subtitle_retrieval_baseline",
+  "corpus": {
+    "videos": [
+      {
+        "video_id": "xzRJOaqDMCg",
+        "duration_seconds": 5922,
+        "segments": 2240,
+        "characters": 79160,
+        "subtitle_sha256": "385e260687421e8be1a29dcd826d4f4e75c921d5c328dc58c86c49d77b6c5eee"
+      },
+      {
+        "video_id": "7WC12HHC55E",
+        "duration_seconds": 3860,
+        "segments": 1558,
+        "characters": 57940,
+        "subtitle_sha256": "d5b701bdbd32ef2ce343a352ed733dbebbb00f6ba096083a82147f7158b0ed2e"
+      },
+      {
+        "video_id": "kBXYFaZ0EN0",
+        "duration_seconds": 4063,
+        "segments": 1507,
+        "characters": 53030,
+        "subtitle_sha256": "9e32ec2517f1adc40b7f5da1398c479e9051afcbf92bc8a62974b9cff0816c1e"
+      },
+      {
+        "video_id": "s-jYxgKMqRc",
+        "duration_seconds": 3618,
+        "segments": 1017,
+        "characters": 59057,
+        "subtitle_sha256": "a5f9ee22af3d5d422bcc4db8a1ab600180370254e4c8fdef486f8e6399dfb2de"
+      }
+    ],
+    "total_segments": 6322,
+    "total_duration_seconds": 17463,
+    "missing_video_ids": [
+      "95XrWA6-UFM"
+    ],
+    "complete_manifest": false,
+    "source": "public English captions; timestamp_quality=estimated"
+  },
+  "chunk_count": 624,
+  "question_count": 60,
+  "human_reviewed_questions": 0,
+  "gold_sha256": "e35a2c0bd7e72c663cba842b8c626b4d70472e6af5efe2f53845e40b7293e63a",
+  "gold_distributed": false,
+  "python": "3.12.14",
+  "device": "cpu",
+  "torch_threads": 4,
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "sentence-transformers": "5.7.0",
+    "transformers": "4.57.6",
+    "qdrant-client": "1.19.1",
+    "jieba": "0.42.1",
+    "yt-dlp": "2026.10.21"
+  },
+  "conditions": {
+    "embedding": "BAAI/bge-small-en-v1.5",
+    "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "enrichment": "off; extractive_fallback",
+    "corpus": "downloaded English captions, all videos searched",
+    "labels": "agent_draft unless explicitly reviewed; provisional, not acceptance score",
+    "ocr_asr_tested": false
+  },
+  "overall": {
+    "queries": 60,
+    "answerable": 48,
+    "unanswerable": 12,
+    "metrics": {
+      "recall_stage_at30": {
+        "recall": 0.875,
+        "mrr": 0.45980474809598854,
+        "hit": 0.875
+      },
+      "rerank_at5": {
+        "recall": 0.7708333333333334,
+        "mrr": 0.5027777777777778,
+        "hit": 0.7708333333333334
+      }
+    },
+    "false_accept_rate": 1.0,
+    "failed_queries": 23
+  },
+  "ablations": {
+    "dense": {
+      "at30": {
+        "recall": 0.8125,
+        "mrr": 0.41273277220967436,
+        "hit": 0.8125
+      },
+      "at5": {
+        "recall": 0.5833333333333334,
+        "mrr": 0.39166666666666666,
+        "hit": 0.5833333333333334
+      }
+    },
+    "bm25": {
+      "at30": {
+        "recall": 0.7291666666666666,
+        "mrr": 0.312746058747897,
+        "hit": 0.7291666666666666
+      },
+      "at5": {
+        "recall": 0.4375,
+        "mrr": 0.28715277777777776,
+        "hit": 0.4375
+      }
+    },
+    "hybrid": {
+      "at30": {
+        "recall": 0.875,
+        "mrr": 0.45980474809598854,
+        "hit": 0.875
+      },
+      "at5": {
+        "recall": 0.6041666666666666,
+        "mrr": 0.43645833333333334,
+        "hit": 0.6041666666666666
+      }
+    }
+  },
+  "by_video": {
+    "xzRJOaqDMCg": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 1.0,
+          "mrr": 0.3960978835978836,
+          "hit": 1.0
+        },
+        "rerank_at5": {
+          "recall": 0.8333333333333334,
+          "mrr": 0.43333333333333335,
+          "hit": 0.8333333333333334
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 5
+    },
+    "7WC12HHC55E": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.9166666666666666,
+          "mrr": 0.6069444444444444,
+          "hit": 0.9166666666666666
+        },
+        "rerank_at5": {
+          "recall": 0.6666666666666666,
+          "mrr": 0.4472222222222222,
+          "hit": 0.6666666666666666
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 7
+    },
+    "s-jYxgKMqRc": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.75,
+          "mrr": 0.4417545015371102,
+          "hit": 0.75
+        },
+        "rerank_at5": {
+          "recall": 0.75,
+          "mrr": 0.5972222222222222,
+          "hit": 0.75
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 6
+    },
+    "kBXYFaZ0EN0": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.8333333333333334,
+          "mrr": 0.39442216280451575,
+          "hit": 0.8333333333333334
+        },
+        "rerank_at5": {
+          "recall": 0.8333333333333334,
+          "mrr": 0.5333333333333333,
+          "hit": 0.8333333333333334
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 5
+    }
+  },
+  "by_type": {
+    "why": {
+      "queries": 9,
+      "answerable": 9,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.8888888888888888,
+          "mrr": 0.37887528309523194,
+          "hit": 0.8888888888888888
+        },
+        "rerank_at5": {
+          "recall": 0.7777777777777778,
+          "mrr": 0.49444444444444446,
+          "hit": 0.7777777777777778
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 2
+    },
+    "factual": {
+      "queries": 20,
+      "answerable": 20,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.85,
+          "mrr": 0.4897041847041847,
+          "hit": 0.85
+        },
+        "rerank_at5": {
+          "recall": 0.7,
+          "mrr": 0.47833333333333333,
+          "hit": 0.7
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 6
+    },
+    "howto": {
+      "queries": 15,
+      "answerable": 15,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.8666666666666667,
+          "mrr": 0.41333333333333333,
+          "hit": 0.8666666666666667
+        },
+        "rerank_at5": {
+          "recall": 0.8,
+          "mrr": 0.4522222222222222,
+          "hit": 0.8
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 3
+    },
+    "compare": {
+      "queries": 4,
+      "answerable": 4,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 1.0,
+          "mrr": 0.6666666666666666,
+          "hit": 1.0
+        },
+        "rerank_at5": {
+          "recall": 1.0,
+          "mrr": 0.8333333333333334,
+          "hit": 1.0
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 0
+    },
+    "unanswerable": {
+      "queries": 12,
+      "answerable": 0,
+      "unanswerable": 12,
+      "metrics": {},
+      "false_accept_rate": 1.0,
+      "failed_queries": 12
+    }
+  },
+  "reranker_score_distributions": {
+    "answerable": {
+      "count": 48,
+      "min": -10.265787124633789,
+      "median": 0.5976423919200897,
+      "max": 6.543496131896973
+    },
+    "unanswerable": {
+      "count": 12,
+      "min": -10.840259552001953,
+      "median": -9.230192184448242,
+      "max": -6.150482177734375
+    }
+  },
+  "elapsed_search_seconds": 43.336219206999886,
+  "failure_counts": {
+    "label_absent_from_candidates": 6,
+    "label_in_candidates_but_not_top5": 5
+  },
+  "not_tested": [
+    "video download/OCR",
+    "Whisper ASR and vocabulary benefit",
+    "Ollama enrichment",
+    "default BGE-M3 + bge-reranker-v2-m3",
+    "workbench end-to-end answers"
+  ],
+  "limitations": [
+    "Labels are unreviewed agent drafts, literal evidence matching is not semantic validation",
+    "Single quote location can omit other valid evidence; long quotes can make coverage too strict",
+    "English small-corpus results do not establish Chinese/company terminology quality",
+    "No independent rejection-threshold calibration",
+    "Gold is not public; exact score reproduction requires the same locally retained gold"
+  ]
+}

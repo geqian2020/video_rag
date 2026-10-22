@@ -1,14 +1,14 @@
-# 完整项目说明与源码（含 OCR 词汇辅助转录）
+# 完整项目说明与源码
 
-目录 → README → 核心代码 → OCR/ASR → 支撑文件。所有代码完整收录。当前进度见 docs/STATUS.md。
+含 OCR 词汇辅助转录与公开字幕评测工具。进度见 docs/STATUS.md，真实云端试跑见 test/CLOUD_RUN.md。实际转录与 gold 不收录。
 
 
 ## docs/PROJECT_TREE.md
 
 ````markdown
-# 新增/替换项目文件目录
+# 项目新增与升级文件目录
 
-workflow/ 为仓库已有内容，保留其现有文件；新增 OCR/ASR 通过 ocr 和 transcribe 入口使用。运行时数据与模型不提交。
+旧 workflow/ 保留。test/ 保存公开来源和通用评测工具；data/、模型、实际 gold 和媒体不提交。
 
 ```text
 video_rag/
@@ -38,6 +38,7 @@ video_rag/
 │   └── VALIDATION.md
 ├── eval/
 │   ├── __init__.py
+│   ├── make_gold.py
 │   ├── run_asr_eval.py
 │   └── run_eval.py
 ├── examples/
@@ -65,9 +66,23 @@ video_rag/
 ├── serve/
 │   ├── __init__.py
 │   └── api.py
+├── test/
+│   ├── CLOUD_RUN.md
+│   ├── QUESTION_PROMPT.md
+│   ├── README.md
+│   ├── __init__.py
+│   ├── cloud_run_summary.json
+│   ├── config.cpu.yaml
+│   ├── download.py
+│   ├── prepare_corpus.py
+│   ├── requirements.txt
+│   ├── run_benchmark.py
+│   ├── urls.txt
+│   └── videos.json
 ├── tests/
 │   ├── test_ocr_asr.py
-│   └── test_pipeline.py
+│   ├── test_pipeline.py
+│   └── test_public_benchmark.py
 ├── tools/
 │   ├── __init__.py
 │   └── prepare_models.py
@@ -76,7 +91,7 @@ video_rag/
     └── run.py
 ```
 
-运行时目录 data/、models/ 不提交；仓库已有 workflow/ 不在以上新增文件清单中。
+运行时 data/、models/ 不提交；仓库原有 workflow/ 不在以上新增/升级源码清单中。
 
 ````
 
@@ -120,6 +135,12 @@ video_rag/
 OCR 错字不会自动入库；`canonical_term` 可人工改正，只有明确 approved 的词条参与识别。每个词保留画面时间和截图，提示词按视频/局部时间筛选且限制 token。新增入口 `python -m transcribe.run` 输出真实 ASR start/end，不把 OCR 文字直接追加进转录或向量。
 
 可选依赖分别是 `requirements-ocr.txt` 和 `requirements-asr.txt`，已有 Whisper/PyTorch 环境与本地权重先复用；单纯运行检索/API 不需要安装这些依赖。配有无词表/有词表的 CER、术语召回和额外术语对照评估。
+
+## 新增：公开 agent 视频测试
+
+[test/](test/README.md) 提供 5 个已核实为 1-2 小时的公开视频来源、下载/字幕转换、出题提示词和时间标签验证。云端已用其中 4 个视频的完整英文字幕跑真实轻量模型检索对照，结果与限制见 [云端测试记录](test/CLOUD_RUN.md)。媒体、真实评测题和完整转录不提交 Git。
+
+`eval.make_gold` 默认要求人工 reviewed；`eval.run_eval` 新增 Hit、无答案误接受、按题型/视频汇总和逐题诊断。阈值必须另用验证集标定。
 
 ## 快速开始
 
@@ -940,68 +961,212 @@ app = create_app()
 ## eval/run_eval.py
 
 ````python
-"""gold set 支持 chunk_id 或 video_id+时间范围，评估召回阶段与重排阶段。"""
+"""时间标签检索评估；支持无答案题、逐题诊断、按题型/视频汇总。"""
 import argparse
+from collections import defaultdict
 import json
+import math
 
 from core.config import load_config
-from core.io import read_rows
+from core.io import read_rows, write_json, write_rows
 from retrieve.search import Searcher
 
 
 def relevant(hit, gold):
-    if "chunk_id" in gold:
-        return hit["chunk_id"] == gold["chunk_id"]
-    if hit["video_id"] != gold["video_id"]:
+    if 'chunk_id' in gold:
+        return hit['chunk_id']==gold['chunk_id']
+    if hit['video_id']!=gold['video_id']:
         return False
-    # 至少覆盖 gold 窗口的一半，避免仅相交一个瞬间就算命中。
-    overlap = max(0, min(hit["end_ts"], gold["end_ts"]) - max(hit["start_ts"], gold["start_ts"]))
-    return overlap / (gold["end_ts"] - gold["start_ts"]) >= .5
+    overlap=max(0,min(hit['end_ts'],gold['end_ts'])-max(hit['start_ts'],gold['start_ts']))
+    # 不采用“重叠 1 秒即可”规则；它会更宽松，反而增加偶然命中。
+    return overlap/(gold['end_ts']-gold['start_ts'])>=.5
 
 
-def metrics(hits, gold, k):
-    # Recall 以 gold 证据数为分母，多条返回命中同一证据只计一次。
-    matched = {i for i, item in enumerate(gold) if any(relevant(h, item) for h in hits[:k])}
-    reciprocal_rank = next((1 / rank for rank, hit in enumerate(hits[:k], 1)
-                            if any(relevant(hit, g) for g in gold)), 0.0)
-    return {"recall": len(matched) / len(gold), "mrr": reciprocal_rank}
+def metrics(hits,gold,k):
+    if not gold:
+        raise ValueError('无答案题不得混入 Recall/MRR 的分母')
+    matched={i for i,g in enumerate(gold) if any(relevant(h,g) for h in hits[:k])}
+    rr=next((1/rank for rank,h in enumerate(hits[:k],1) if any(relevant(h,g) for g in gold)),0.)
+    return {'recall':len(matched)/len(gold),'mrr':rr,'hit':float(bool(matched))}
 
 
 def validate_gold(rows):
-    if not rows:
-        raise ValueError("gold set 不能为空")
+    if not rows:raise ValueError('gold set 不能为空')
     for row in rows:
-        if not isinstance(row.get("query"), str) or not row["query"].strip() or not row.get("relevant"):
-            raise ValueError("每条 gold 必须有 query 和非空 relevant")
-        for g in row["relevant"]:
-            if "chunk_id" not in g:
+        if not isinstance(row.get('query'),str) or not row['query'].strip() or 'relevant' not in row:
+            raise ValueError('每条 gold 必须有 query 和 relevant')
+        if row.get('type')=='unanswerable':
+            if row['relevant']:raise ValueError('无答案题的 relevant 必须为空')
+        elif not row['relevant']:
+            raise ValueError('可回答题需要非空 relevant')
+        for g in row['relevant']:
+            if 'chunk_id' not in g:
                 from core.schema import Segment
-                Segment(video_id=g["video_id"], text="gold", start=g["start_ts"], end=g["end_ts"])
+                Segment(video_id=g['video_id'],text='gold',start=g['start_ts'],end=g['end_ts'])
     return rows
 
 
+def make_record(row,candidates,results,min_score=None):
+    if min_score is not None and not math.isfinite(min_score):raise ValueError('min_score 必须为有限数')
+    accepted=results if min_score is None else [h for h in results if h['rerank_score']>=min_score]
+    record={'query':row['query'],'type':row.get('type','unspecified'),
+        'video_id':row.get('video_id') or (row['relevant'][0].get('video_id','unknown') if row['relevant'] else 'unknown'),
+        'reviewed':row.get('reviewed'), 'label_status':row.get('label_status','unspecified'),
+        'split':row.get('split','test'),'relevant':row['relevant'],
+        'candidates':candidates,'results':results,'accepted_results':accepted,
+        'max_rerank_score':max((h['rerank_score'] for h in results),default=None)}
+    if row.get('type')=='unanswerable':
+        record.update(answerable=False,false_accept=bool(accepted),failed=bool(accepted))
+    else:
+        a,b=metrics(candidates,row['relevant'],30),metrics(accepted,row['relevant'],5)
+        record.update(answerable=True,recall_stage_at30=a,rerank_at5=b,failed=b['recall']<1)
+    return record
+
+
+def aggregate(records):
+    yes=[r for r in records if r['answerable']];no=[r for r in records if not r['answerable']]
+    means={stage:{key:sum(r[stage][key] for r in yes)/len(yes) for key in ['recall','mrr','hit']}
+           for stage in ['recall_stage_at30','rerank_at5']} if yes else {}
+    return {'queries':len(records),'answerable':len(yes),'unanswerable':len(no),
+            'metrics':means,'false_accept_rate':sum(r['false_accept'] for r in no)/len(no) if no else None,
+            'failed_queries':sum(r['failed'] for r in records)}
+
+
+def report(records,min_score=None):
+    by_type=defaultdict(list);by_video=defaultdict(list)
+    for r in records:
+        by_type[r['type']].append(r);by_video[r['video_id']].append(r)
+    return {'overall':aggregate(records),'by_type':{k:aggregate(v) for k,v in by_type.items()},
+        'by_video':{k:aggregate(v) for k,v in by_video.items()},'min_score':min_score,
+        'unreviewed_or_unspecified_labels':sum(r['reviewed'] is not True for r in records),
+        'note':'阈值应在独立验证集选择后锁定；不应在同一测试集调参。未设阈值时有返回的无答案题会计为误接受。'}
+
+
 def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--gold", default="examples/gold.jsonl")
-    p.add_argument("--config", default=None)
-    a = p.parse_args()
-    rows = validate_gold(read_rows(a.gold))
-    searcher = Searcher(load_config(a.config))
-    measurements = []
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--gold',default='examples/gold.jsonl')
+    p.add_argument('--config',default=None)
+    p.add_argument('--min-score',type=float,default=None)
+    p.add_argument('--output',default=None,help='本地汇总报告 JSON，勿上传真实评测数据')
+    p.add_argument('--details',default=None,help='本地逐题候选/结果/失败记录 JSONL')
+    a=p.parse_args();rows=validate_gold(read_rows(a.gold));searcher=Searcher(load_config(a.config))
+    records=[]
     try:
         for row in rows:
-            out = searcher.search(row["query"], top_k=5, video_ids=row.get("video_ids"), include_candidates=True)
-            measurements.append({"recall_stage@30": metrics(out["candidates"], row["relevant"], 30),
-                                 "rerank@5": metrics(out["results"], row["relevant"], 5)})
-    finally:
-        searcher.close()
-    report = {stage: {name: sum(m[stage][name] for m in measurements) / len(rows)
-                     for name in ("recall", "mrr")} for stage in measurements[0]}
-    print(json.dumps({"queries": len(rows), "metrics": report}, indent=2))
+            out=searcher.search(row['query'],top_k=5,video_ids=row.get('video_ids'),include_candidates=True)
+            records.append(make_record(row,out['candidates'],out['results'],a.min_score))
+    finally:searcher.close()
+    out=report(records,a.min_score)
+    if a.output:write_json(a.output,out)
+    if a.details:write_rows(a.details,records)
+    print(json.dumps(out,ensure_ascii=False,indent=2))
 
 
-if __name__ == "__main__":
-    main()
+if __name__=='__main__':main()
+
+````
+
+
+## eval/make_gold.py
+
+````python
+"""验证逐字证据并映射到稳定时间段；默认仅接纳人工 reviewed=true 的题。"""
+import argparse
+from collections import defaultdict
+import re
+
+from core.io import read_rows, write_json, write_rows
+from core.schema import Segment
+
+
+def norm(text):
+    return re.sub(r'\s+', '', text)
+
+
+def source_index(rows):
+    groups=defaultdict(list)
+    for raw in rows:
+        seg=Segment.model_validate(raw)
+        groups[seg.video_id].append(seg.model_dump())
+    index={}
+    for video,segs in groups.items():
+        segs.sort(key=lambda s:(s['start'],s['end']))
+        spans=[];full=''
+        for seg in segs:
+            text=norm(seg['text'])
+            spans.append((len(full),len(full)+len(text),seg));full+=text
+        index[video]=(full,spans)
+    return index
+
+
+def locate(evidence, indexed, hint=None, max_seconds=60):
+    ev=norm(evidence)
+    if not ev:
+        raise ValueError('empty_evidence')
+    full,spans=indexed
+    positions=[];cursor=0
+    while True:
+        cursor=full.find(ev,cursor)
+        if cursor<0:break
+        positions.append(cursor);cursor+=1
+    candidates=[]
+    for pos in positions:
+        hit=[s for a,b,s in spans if a<pos+len(ev) and b>pos]
+        start,end=min(s['start'] for s in hit),max(s['end'] for s in hit)
+        if end-start>max_seconds or any(b['start']-a['end']>10 for a,b in zip(hit,hit[1:])):
+            continue
+        if hint is not None and not start<=hint<=end:
+            continue
+        candidates.append((start,end))
+    if len(candidates)!=1:
+        raise ValueError('evidence_not_found_or_ambiguous')
+    return candidates[0]
+
+
+def make_gold(segments,drafts,allow_unreviewed=False):
+    index=source_index(segments);kept=[];rejected=[];seen=set()
+    for number,row in enumerate(drafts,1):
+        try:
+            query=row.get('query','').strip();video=row.get('video_id')
+            if not query or video not in index:raise ValueError('missing_query_or_unknown_video')
+            if norm(query).casefold() in seen:raise ValueError('duplicate_query')
+            reviewed=row.get('reviewed') is True
+            if not reviewed and not allow_unreviewed:raise ValueError('human_review_required')
+            kind=row.get('type')
+            if kind not in {'factual','howto','why','compare','unanswerable'}:raise ValueError('invalid_type')
+            evidence=row.get('evidence',[])
+            if isinstance(evidence,str):evidence=[evidence] if evidence.strip() else []
+            relevant=[]
+            if kind=='unanswerable':
+                if evidence or row.get('answer'):raise ValueError('unanswerable_must_have_empty_evidence_and_answer')
+            else:
+                if not evidence or len(evidence)>3:raise ValueError('require_one_to_three_quotes')
+                for quote in evidence:
+                    start,end=locate(quote,index[video],row.get('evidence_start_hint'))
+                    relevant.append({'video_id':video,'start_ts':start,'end_ts':end,'evidence':quote})
+            kept.append({'query':query,'answer':row.get('answer',''),'type':kind,'video_id':video,
+                'relevant':relevant,'reviewed':reviewed,'split':row.get('split','test'),
+                'label_status':'human_reviewed' if reviewed else 'agent_draft'})
+            seen.add(norm(query).casefold())
+        except (ValueError,TypeError,KeyError,AttributeError) as exc:
+            rejected.append({'line':number,'reason':str(exc)})
+    return kept,rejected
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--segments',required=True)
+    p.add_argument('--draft',required=True)
+    p.add_argument('--output',default='data/public_benchmark/gold.jsonl')
+    p.add_argument('--allow-unreviewed',action='store_true',help='仅限流程试跑，输出带 agent_draft 标记')
+    a=p.parse_args()
+    gold,rejects=make_gold(read_rows(a.segments),read_rows(a.draft),a.allow_unreviewed)
+    if not gold:raise ValueError('无合格题；未覆盖已有 gold，请检查 reviewed/证据/拒绝原因：'+str(rejects[:5]))
+    write_rows(a.output,gold);write_json(a.output+'.rejected.json',rejects)
+    print({'kept':len(gold),'dropped':len(rejects),'draft_only':a.allow_unreviewed})
+
+
+if __name__=='__main__':main()
 
 ````
 
@@ -2368,11 +2533,11 @@ def open_store(cfg, generation_dir):
 | 原有仓库代码审查 | 完成 | REPOSITORY_REVIEW.md 记录分块、时间戳、ID、清洗与旧库问题 |
 | 新 RAG 通用代码 | 完成 | 分块、增强、dense/sparse、RRF、重排、API、评估与配置均有实现 |
 | OCR 词汇库与辅助转录代码 | 完成 | 新入口 ocr.extract、ocr.vocab、transcribe.run |
-| 自动化测试 | 已有 34 项通过记录 | 真实 Qdrant / ffmpeg；Whisper、embedding、reranker、Ollama 使用测试替身或请求模拟 |
+| 自动化测试 | 已有 41 项通过记录 | 真实 Qdrant / ffmpeg；Whisper、embedding、reranker、Ollama 使用测试替身或请求模拟 |
 | 真实本地 OCR 测试 | 通过清晰测试图验证 | 真实 RapidOCR 正确识别生成图中的英文术语，不代表公司视频质量 |
 | 文档与交付 | 完成 | 中文 README、OCR 操作、依赖、配置、示例、Docker 文件与验证记录 |
 | 公司视频专有名词效果 | 待验证 | 需代表性短视频、人工确认词表和校对参考文本 |
-| 真实模型全链路 | 待验证 | 需目标机已有 Whisper/BGE/reranker/Ollama 权重 |
+| 默认生产模型全链路 | 待验证 | 真实英文轻量检索基线已完成；Whisper/BGE-M3/Ollama 目标链路仍需验收 |
 | Windows / GPU / Docker | 待验证 | 已提供操作与配置，尚无对应运行验收记录 |
 | 公司聊天工作台联调 | 待完成 | 接入方后端需要调用 /search 并处理来源引用与上下文 |
 
@@ -2390,15 +2555,23 @@ def open_store(cfg, generation_dir):
 
 本次提交新增通用代码、文档、配置及虚构示例，不提交本地截图、模型、生成词库、业务转录或测试环境。仓库原有 workflow 下已经跟踪的数据库/转录/日志没有在本次自动删除，历史数据排查见 REPOSITORY_REVIEW.md。
 
+## 公开语料云端试跑补充
+
+已新增 test/ 目录，核对 5 个长视频原网址；实际下载其中 4 个的英文字幕（4h51m03s），6322 段生成 624 块，60 道 agent_draft 题运行真实 BGE-small-en/MiniLM cross-encoder 基线。融合 Recall@30=87.50%，重排 Hit@5=77.08%，MRR@5=0.5028。12 道无答案题在无拒绝阈值时均返回结果。具体来源、对照实验与限制见 ../test/CLOUD_RUN.md。
+
+此次公开字幕检索已实际执行；公司视频/词库效果、默认 BGE-M3 全链路、人工确认 gold 和工作台端到端测试仍待完成。未将公开字幕测试说成视频 OCR/ASR 的验证。
+
 ````
 
 
 ## docs/VALIDATION.md
 
 ````markdown
-# 验证记录（含 OCR 辅助转录升级）
+# 验证记录
 
-- 当前验证环境：Linux x86_64、Python 3.12.14；未安装真实 Whisper、embedding、reranker 权重或 Ollama 服务。OCR 使用真实本地 RapidOCR 模型做了独立验证。
+## OCR/ASR 升级阶段（历史记录）
+
+- 该阶段验证环境：Linux x86_64、Python 3.12.14；未安装真实 Whisper、embedding、reranker 权重或 Ollama 服务。OCR 使用真实本地 RapidOCR 模型做了独立验证。
 - `python -m pytest -q`：**34 passed**，约 1.85 秒。Starlette 对其测试客户端使用 httpx 发出一条弃用提醒，不影响测试通过。
 - 编译、CLI --help、示例配置、转录与 gold 格式校验通过。
 - 原 RAG 使用真实 Qdrant embedded 完成 dense/sparse 写入、过滤、查询、替换索引、建库失败保护；语义模型为显式测试替身。
@@ -2417,6 +2590,10 @@ def open_store(cfg, generation_dir):
 尚未执行：真实 RAG/Whisper/Ollama 全链路、公司模糊画面的 OCR 质量、GPU、Windows、Docker build/compose、真实检索指标、公司工作台联调。部署前使用批准的完整权重跑 README 与 OCR_ASSISTED_ASR.md 的流程，记录准确依赖版本与模型 SHA。
 
 交付只包含通用源码、文档与虚构样例，不包含本地截图、词库、业务转录、旧 Chroma 数据库、下载的模型或测试环境；本次源码通过 GitHub 提交发布，不改写已有历史；发布结果以 main 提交记录为准。
+
+## 最新：公开语料测试升级
+
+新增 test/ 下载/字幕转换/CPU 基线和 eval.make_gold；扩展 eval.run_eval 的无答案、Hit、分组与逐题诊断。当前回归测试 **41 passed**（两条依赖弃用提醒）。另实际运行 4 个公开视频的完整字幕、624 块、60 道草稿题的真实轻量 embedding + cross-encoder 检索，详情见 ../test/CLOUD_RUN.md。这项真实推理区别于早期测试替身；默认生产模型与 OCR/Whisper 验收边界不变。
 
 ````
 
@@ -2549,6 +2726,961 @@ if __name__ == "__main__":
 ## serve/__init__.py
 
 ````python
+
+````
+
+
+## test/CLOUD_RUN.md
+
+````markdown
+# 云端实际测试记录
+
+日期：2026-10-22。状态：**公开英文字幕、真实 CPU 模型、agent 草稿标签的初步检索基线**。尚非正式验收。
+
+## 实际范围
+
+- 核对 5 个原始视频的标题、作者和时长，均在 1-2 小时；取得 4 个完整英文字幕，共 4 小时 51 分 03 秒。95XrWA6-UFM 被 HTTP 429 限流，本次未进入索引。
+- 共 6322 条字幕、624 个语义块；4 个视频全局检索，未把答案视频作为过滤条件。
+- 每视频 12 道可回答题 + 3 道无答案题，共 60 道；逐字证据映射通过，人工审核数为 0。
+- 使用真实 BGE-small-en-v1.5、MiniLM-L-6 cross-encoder 和 Qdrant embedded，CPU 运行。未使用检索模型测试替身。
+- 摘要为摘录、生成问题增强关闭；未运行 Ollama。字幕由平台取得，不是本项目 Whisper 生成。
+
+## 对照结果
+
+以下对 48 道可回答草稿题计分。每题一个时间标签，因此本轮 Hit@5=Recall@5。
+
+| 方案 | Recall@30 | Hit@5 / Recall@5 | MRR@5 |
+|---|---:|---:|---:|
+| Dense | 81.25% | 58.33% | 0.3917 |
+| BM25 | 72.92% | 43.75% | 0.2872 |
+| RRF 混合 | 87.50% | 60.42% | 0.4365 |
+| RRF + cross-encoder | 87.50% | 77.08% | 0.5028 |
+
+本轮混合召回与重排均有收益；Recall@30 仍低于 95% 参考目标。不能把未经人工审核的草稿成绩当作最终结果。
+
+## 分视频
+
+| 视频 ID | Recall@30 | 重排 Hit@5 |
+|---|---:|---:|
+| xzRJOaqDMCg | 100.00% | 83.33% |
+| 7WC12HHC55E | 91.67% | 66.67% |
+| s-jYxgKMqRc | 75.00% | 75.00% |
+| kBXYFaZ0EN0 | 83.33% | 83.33% |
+
+## 无答案与失败
+
+- 无拒绝阈值时，12/12 无答案题仍返回 Top-5，按“返回即接受”的离线定义误接受率为 100%；本次没有运行工作台 LLM，不代表 LLM 已被测出 100% 错答。
+- 6 道可回答题的标注证据未进入融合 Top-30；另 5 道进入候选但没进入 Top-5。
+- 逐题查看发现分块边界及其他同主题位置：单一时间标签可能漏掉有效证据，10 条字幕组成的草稿摘录也可能包含额外上下文，使 50% 覆盖判定偏严。先人工精简/补全标签，不能为了追分改命中规则。
+- 正负题最大重排分数有重叠，不从同一测试集直接选择生产 min_score。应另建验证集，锁定阈值后再测留出集。
+
+## 未完成范围
+
+未下载四个完整视频媒体，未执行 OCR 或 Whisper，也未测有/无词库的识别收益。未测试默认 BGE-M3/bge-reranker-v2-m3、中文公司术语、Ollama 增强或工作台端到端回答。60 道题均为 agent_draft，不能代替独立手写真实问题与人工审核。
+
+## 复用与数据范围
+
+原网址见 urls.txt；下载/重新评测步骤见 README.md。完整字幕、草稿题、gold、索引与逐题结果只留本地 data/public_benchmark/。仅提交来源、通用脚本和聚合报告。
+gold SHA-256：`e35a2c0bd7e72c663cba842b8c626b4d70472e6af5efe2f53845e40b7293e63a`。gold 未公开，别人可下载同一语料建立自己的评测；完全复现本次分数还需要同一份已保留的 gold。
+
+机器可读的来源哈希、模型/依赖版本与分组结果见 cloud_run_summary.json；固定模型 revision 见 config.cpu.yaml。
+
+````
+
+
+## test/QUESTION_PROMPT.md
+
+````markdown
+# 公司 agent 出题提示词（每次只提供一个视频）
+
+输入 video_id、字幕/转录，每行 [start-end] 原文。只在已批准环境处理公司资料。
+
+请生成 12-16 道可回答问题，另加 3 道相关但当前语料没有答案的问题。
+
+- 可回答题只能凭 1-3 条相邻转录片段回答，不依赖外部知识。题型混合 factual/howto/why/compare。
+- 不照抄问题措辞，至少三分之一使用口语、缩写或同义表达；不要看到 ASR 错词就跟着错写标准术语。
+- evidence 逐字摘录，不能伪造。多段可用 evidence 数组列出各自逐字摘录，限相邻来源。
+- 不可回答题 type=unanswerable，evidence=[]，answer=""；相关性不能取代人工确认。应检查整个检索语料而非只看单视频。
+- 所有题最初 reviewed=false。不要把生成答案当作已验证事实。
+- 输出 JSONL，不加 Markdown。每行：
+
+```json
+{"video_id":"视频ID","query":"换一种说法的问题","answer":"仅由证据支持的参考答案","evidence":["逐字摘录"],"type":"factual","reviewed":false}
+```
+
+收到稿件后，人工核对问题、答案、证据与语料范围，将合格题的 reviewed 改 true。再加入独立手写真实问题，特别检查标准术语/缩写。不要把整份评测集当作提示词喂给 enrichment。
+
+````
+
+
+## test/README.md
+
+````markdown
+# 公开 agent 视频测试集
+
+本目录保存原始视频页面链接、可核对的标题/作者/时长、下载工具和评测操作。**`test/` 是仓库目录**；代码仍在 main 分支。媒体、完整字幕、实际问题/答案/证据、索引与逐题记录均放 data/public_benchmark/，不提交 Git。
+
+## 来源
+
+原始地址一行一个见 [urls.txt](urls.txt)，机器可读元信息见 [videos.json](videos.json)。时长是 2026-10-22 从 YouTube watch-page 的 videoDetails.lengthSeconds 读取，不用搜索摘要猜测；列出字幕轨道不代表每个环境都能成功下载。
+
+| ID | 视频/作者 | 时长 | 方向 |
+|---|---|---|---|
+| xzRJOaqDMCg | LangChain Tutorial for Beginners: Build Production-Ready AI Agents from Scratch in 99 Minutes — Zahiruddin Tavargere | 1:38:42 | 工具、记忆、MCP、人工审批与动态行为 |
+| 7WC12HHC55E | 1 Hour LangGraph Crash Course — Machine Learning With Hamza | 1:04:20 | 图状态、路由、检查点、HITL、ReAct |
+| 95XrWA6-UFM | Building Agentic and Multi-Agent Systems with LangGraph — Open Data Science and AI Conference | 1:59:27 | Agentic RAG 与多智能体 |
+| kBXYFaZ0EN0 | CrewAI Step-by-Step — Alejandro AO | 1:07:43 | 任务依赖、工具和会议助理 |
+| s-jYxgKMqRc | Master CrewAI: Your Ultimate Beginner's Guide! — Sam Witteveen | 1:00:18 | 角色、任务、委派和进程 |
+
+videos.json 的 alternates 另外保留了 MCP workshop 来源；该来源在本次云端下载尝试中被 HTTP 429 限流。访问失败如实记录，不绕过登录、付费或下载保护。公开可观看不等于允许重新分发；按原站规则及作者授权获取，Git 只保存链接与工具。
+
+## 1. 下载视频或先用字幕
+
+先复用现有 Python/ffmpeg/模型缓存。在有网络并获准下载的机器运行：
+
+```bash
+pip install -r requirements.txt
+pip install -r test/requirements.txt
+python -m test.download --mode subtitles
+# 要测视频 OCR/本地 ASR，显式下载媒体：
+python -m test.download --mode both
+```
+
+默认仅下载英文字幕，减少数 GB 媒体传输；manual/auto 字幕由 yt-dlp 选择，下载后仍需抽查标准术语。字幕来自平台而非项目 Whisper，这条路径只验证检索，**不能证明 OCR 词库改善了 ASR**。
+
+公司代理 CA 在操作系统可信库、而默认 certifi 不认识时可加 `--system-ca`，仍然验证 TLS。不要关闭证书校验。工具复用已有有效字幕；失败写本地 downloads.json 和日志并返回非零。遇到 429 按平台提示稍后重试，不反复轰击接口；本次云端有一条主来源因此未进入测试。yt-dlp 的 YouTube 视频格式提取可能另需其官方支持的 JavaScript runtime，查看官方 README。
+
+输出：
+
+- data/public_benchmark/raw/视频ID/：原始 JSON3 字幕/可选媒体。
+- data/public_benchmark/downloads.json：各来源成功/失败与文件哈希。
+
+## 2. 字幕标准化
+
+```bash
+python -m test.prepare_corpus
+# 已明确有来源缺失，只想测已取得的子集时：
+python -m test.prepare_corpus --allow-missing
+```
+
+转换后有 per-video segments/、合并 transcripts.jsonl 和 corpus_stats.json。字幕滚动显示会让 display duration 重叠，转换时将每个事件的结束时间限制到下一条正文起点，并标记 timestamp_quality=estimated；不用显示时长伪装逐字口播对齐。统计明确列出缺失来源，部分语料不会伪装成完整 manifest。
+
+## 3. 造题、证据定位与人工审核
+
+每个视频只给 agent 相应视频内容，使用 [QUESTION_PROMPT.md](QUESTION_PROMPT.md)。建议 60-100 题并混入标准术语手写题，含相关无答案题。每题 video_id 是标签来源；**不把它复制成检索参数 video_ids**，评测时所有视频均参与竞争。
+
+默认需要人工 reviewed=true 才生成 gold：
+
+```bash
+python -m eval.make_gold --segments data/public_benchmark/transcripts.jsonl \
+  --draft data/public_benchmark/draft.jsonl --output data/public_benchmark/gold.jsonl
+```
+
+只做流程试跑可显式加 `--allow-unreviewed`；结果会带 agent_draft，不能当最终验收分数。脚本检查逐字证据、视频范围、空/重复问题、重复证据位置与时间连续性；不能用字面匹配替代对问题/答案真实性和无答案范围的人工审核。
+
+gold 的时间字段统一为当前仓库格式：
+
+```json
+{"query":"换一种说法的问题","type":"howto","video_id":"来源视频ID","reviewed":true,"relevant":[{"video_id":"来源视频ID","start_ts":120.0,"end_ts":135.0,"evidence":"逐字原文"}]}
+```
+
+证据重复出现时默认拒绝；draft 可提供 evidence_start_hint 指向经检查的出现时间。不使用首个 find 结果随意定位。无答案题 relevant=[]，需人工确认在**整个检索语料**无答案。标签只引用时间范围，换分块参数后仍可使用。
+
+不采用“交叠 1 秒即可命中”的规则，它会放宽判定。本项目仍要求单块覆盖至少 50% 的 gold 时间段；多段证据各自计 Recall，同一证据多次命中不重复计数。跨块完整覆盖暂需逐题检查，比较分块方案时应同时看 chunk 时长与失败实例。
+
+## 4. 实际检索评估
+
+根目录 config.yaml 为正式 BGE-M3 + bge-reranker-v2-m3 方案；默认需要已准备的本地权重与 Ollama。按根 README 建库，然后：
+
+```bash
+python -m eval.run_eval --gold data/public_benchmark/gold.jsonl \
+  --output data/public_benchmark/eval.json --details data/public_benchmark/details.jsonl
+```
+
+按视频、题型汇总；可回答题统计 Recall@30、Recall@5、Hit@5 和 MRR，无答案题单独计算误接受率。逐题记录含候选和最终证据，真实数据不可提交。可用 --min-score 评估一个**已在独立验证集选定**的阈值；不要在这批测试题上调完阈值又报告同批分数。此参数为离线评估开关，尚未自动修改生产 API 的拒答策略。
+
+### 可选轻量英文 CPU 基线
+
+本次云端无 GPU，使用真实小模型跑英文字幕，不依赖 Ollama：
+
+- embedding：BAAI/bge-small-en-v1.5，固定 revision 在 config.cpu.yaml。
+- cross-encoder：cross-encoder/ms-marco-MiniLM-L-6-v2，固定 revision。
+- Dense 只编码原文；摘要为摘录，问题增强关闭，状态明确标为 extractive_fallback。
+- 所有视频全局检索；dense/BM25/hybrid 各比较前 30 与前 5，另测 hybrid+rerank。
+
+先用批准的方式准备以上模型到本地缓存，或将 test/config.cpu.yaml 改为完整本地目录（不提交公司路径），再运行：
+
+```bash
+python -m test.run_benchmark --build --gold data/public_benchmark/gold.jsonl
+# 语料/分块/模型没有变化时不重复建库：
+python -m test.run_benchmark --gold data/public_benchmark/gold.jsonl
+```
+
+offline=true，不会因模型缺失自动下载。仅有 CPU 时，可先从 PyTorch 官方 CPU wheel 渠道准备 torch，避免误装大型 CUDA 依赖；已有 torch 直接复用。
+
+产出 report.json、details.jsonl。最新实际运行范围和指标见 [CLOUD_RUN.md](CLOUD_RUN.md)。未启用生成问题增强，所以本次不能衡量 enrichment 的收益；英文基线不能替代中文专有名词测试或正式 BGE-M3 的评估。
+
+## 5. 失败分析与后续
+
+从 details.jsonl 筛选 failed=true，人工标记：证据在 30 条外、重排丢失、分块边界、ASR 术语错词、缩写/同义词、跨段推理、标签错误。先修标签与数据，再调参。无答案 score 分布只用于设计验证集；不直接写生产阈值。
+
+视频 OCR/Whisper 要另走 docs/OCR_ASSISTED_ASR.md，比较同段音频无词表/有词表的 CER、术语命中与误插词；完成后再对照检索效果。待检索稳定，最后由批准的工作台 LLM 做端到端正确性/忠实度/拒答抽测。
+
+官方工具资料：[yt-dlp](https://github.com/yt-dlp/yt-dlp)、[BGE small](https://huggingface.co/BAAI/bge-small-en-v1.5)、[MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2)。
+
+````
+
+
+## test/__init__.py
+
+````python
+
+````
+
+
+## test/cloud_run_summary.json
+
+````json
+{
+  "run_date": "2026-10-22",
+  "status": "provisional_agent_draft_subtitle_retrieval_baseline",
+  "corpus": {
+    "videos": [
+      {
+        "video_id": "xzRJOaqDMCg",
+        "duration_seconds": 5922,
+        "segments": 2240,
+        "characters": 79160,
+        "subtitle_sha256": "385e260687421e8be1a29dcd826d4f4e75c921d5c328dc58c86c49d77b6c5eee"
+      },
+      {
+        "video_id": "7WC12HHC55E",
+        "duration_seconds": 3860,
+        "segments": 1558,
+        "characters": 57940,
+        "subtitle_sha256": "d5b701bdbd32ef2ce343a352ed733dbebbb00f6ba096083a82147f7158b0ed2e"
+      },
+      {
+        "video_id": "kBXYFaZ0EN0",
+        "duration_seconds": 4063,
+        "segments": 1507,
+        "characters": 53030,
+        "subtitle_sha256": "9e32ec2517f1adc40b7f5da1398c479e9051afcbf92bc8a62974b9cff0816c1e"
+      },
+      {
+        "video_id": "s-jYxgKMqRc",
+        "duration_seconds": 3618,
+        "segments": 1017,
+        "characters": 59057,
+        "subtitle_sha256": "a5f9ee22af3d5d422bcc4db8a1ab600180370254e4c8fdef486f8e6399dfb2de"
+      }
+    ],
+    "total_segments": 6322,
+    "total_duration_seconds": 17463,
+    "missing_video_ids": [
+      "95XrWA6-UFM"
+    ],
+    "complete_manifest": false,
+    "source": "public English captions; timestamp_quality=estimated"
+  },
+  "chunk_count": 624,
+  "question_count": 60,
+  "human_reviewed_questions": 0,
+  "gold_sha256": "e35a2c0bd7e72c663cba842b8c626b4d70472e6af5efe2f53845e40b7293e63a",
+  "gold_distributed": false,
+  "python": "3.12.14",
+  "device": "cpu",
+  "torch_threads": 4,
+  "versions": {
+    "torch": "2.14.1+cpu",
+    "sentence-transformers": "5.7.0",
+    "transformers": "4.57.6",
+    "qdrant-client": "1.19.1",
+    "jieba": "0.42.1",
+    "yt-dlp": "2026.10.21"
+  },
+  "conditions": {
+    "embedding": "BAAI/bge-small-en-v1.5",
+    "reranker": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "enrichment": "off; extractive_fallback",
+    "corpus": "downloaded English captions, all videos searched",
+    "labels": "agent_draft unless explicitly reviewed; provisional, not acceptance score",
+    "ocr_asr_tested": false
+  },
+  "overall": {
+    "queries": 60,
+    "answerable": 48,
+    "unanswerable": 12,
+    "metrics": {
+      "recall_stage_at30": {
+        "recall": 0.875,
+        "mrr": 0.45980474809598854,
+        "hit": 0.875
+      },
+      "rerank_at5": {
+        "recall": 0.7708333333333334,
+        "mrr": 0.5027777777777778,
+        "hit": 0.7708333333333334
+      }
+    },
+    "false_accept_rate": 1.0,
+    "failed_queries": 23
+  },
+  "ablations": {
+    "dense": {
+      "at30": {
+        "recall": 0.8125,
+        "mrr": 0.41273277220967436,
+        "hit": 0.8125
+      },
+      "at5": {
+        "recall": 0.5833333333333334,
+        "mrr": 0.39166666666666666,
+        "hit": 0.5833333333333334
+      }
+    },
+    "bm25": {
+      "at30": {
+        "recall": 0.7291666666666666,
+        "mrr": 0.312746058747897,
+        "hit": 0.7291666666666666
+      },
+      "at5": {
+        "recall": 0.4375,
+        "mrr": 0.28715277777777776,
+        "hit": 0.4375
+      }
+    },
+    "hybrid": {
+      "at30": {
+        "recall": 0.875,
+        "mrr": 0.45980474809598854,
+        "hit": 0.875
+      },
+      "at5": {
+        "recall": 0.6041666666666666,
+        "mrr": 0.43645833333333334,
+        "hit": 0.6041666666666666
+      }
+    }
+  },
+  "by_video": {
+    "xzRJOaqDMCg": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 1.0,
+          "mrr": 0.3960978835978836,
+          "hit": 1.0
+        },
+        "rerank_at5": {
+          "recall": 0.8333333333333334,
+          "mrr": 0.43333333333333335,
+          "hit": 0.8333333333333334
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 5
+    },
+    "7WC12HHC55E": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.9166666666666666,
+          "mrr": 0.6069444444444444,
+          "hit": 0.9166666666666666
+        },
+        "rerank_at5": {
+          "recall": 0.6666666666666666,
+          "mrr": 0.4472222222222222,
+          "hit": 0.6666666666666666
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 7
+    },
+    "s-jYxgKMqRc": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.75,
+          "mrr": 0.4417545015371102,
+          "hit": 0.75
+        },
+        "rerank_at5": {
+          "recall": 0.75,
+          "mrr": 0.5972222222222222,
+          "hit": 0.75
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 6
+    },
+    "kBXYFaZ0EN0": {
+      "queries": 15,
+      "answerable": 12,
+      "unanswerable": 3,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.8333333333333334,
+          "mrr": 0.39442216280451575,
+          "hit": 0.8333333333333334
+        },
+        "rerank_at5": {
+          "recall": 0.8333333333333334,
+          "mrr": 0.5333333333333333,
+          "hit": 0.8333333333333334
+        }
+      },
+      "false_accept_rate": 1.0,
+      "failed_queries": 5
+    }
+  },
+  "by_type": {
+    "why": {
+      "queries": 9,
+      "answerable": 9,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.8888888888888888,
+          "mrr": 0.37887528309523194,
+          "hit": 0.8888888888888888
+        },
+        "rerank_at5": {
+          "recall": 0.7777777777777778,
+          "mrr": 0.49444444444444446,
+          "hit": 0.7777777777777778
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 2
+    },
+    "factual": {
+      "queries": 20,
+      "answerable": 20,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.85,
+          "mrr": 0.4897041847041847,
+          "hit": 0.85
+        },
+        "rerank_at5": {
+          "recall": 0.7,
+          "mrr": 0.47833333333333333,
+          "hit": 0.7
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 6
+    },
+    "howto": {
+      "queries": 15,
+      "answerable": 15,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 0.8666666666666667,
+          "mrr": 0.41333333333333333,
+          "hit": 0.8666666666666667
+        },
+        "rerank_at5": {
+          "recall": 0.8,
+          "mrr": 0.4522222222222222,
+          "hit": 0.8
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 3
+    },
+    "compare": {
+      "queries": 4,
+      "answerable": 4,
+      "unanswerable": 0,
+      "metrics": {
+        "recall_stage_at30": {
+          "recall": 1.0,
+          "mrr": 0.6666666666666666,
+          "hit": 1.0
+        },
+        "rerank_at5": {
+          "recall": 1.0,
+          "mrr": 0.8333333333333334,
+          "hit": 1.0
+        }
+      },
+      "false_accept_rate": null,
+      "failed_queries": 0
+    },
+    "unanswerable": {
+      "queries": 12,
+      "answerable": 0,
+      "unanswerable": 12,
+      "metrics": {},
+      "false_accept_rate": 1.0,
+      "failed_queries": 12
+    }
+  },
+  "reranker_score_distributions": {
+    "answerable": {
+      "count": 48,
+      "min": -10.265787124633789,
+      "median": 0.5976423919200897,
+      "max": 6.543496131896973
+    },
+    "unanswerable": {
+      "count": 12,
+      "min": -10.840259552001953,
+      "median": -9.230192184448242,
+      "max": -6.150482177734375
+    }
+  },
+  "elapsed_search_seconds": 43.336219206999886,
+  "failure_counts": {
+    "label_absent_from_candidates": 6,
+    "label_in_candidates_but_not_top5": 5
+  },
+  "not_tested": [
+    "video download/OCR",
+    "Whisper ASR and vocabulary benefit",
+    "Ollama enrichment",
+    "default BGE-M3 + bge-reranker-v2-m3",
+    "workbench end-to-end answers"
+  ],
+  "limitations": [
+    "Labels are unreviewed agent drafts, literal evidence matching is not semantic validation",
+    "Single quote location can omit other valid evidence; long quotes can make coverage too strict",
+    "English small-corpus results do not establish Chinese/company terminology quality",
+    "No independent rejection-threshold calibration",
+    "Gold is not public; exact score reproduction requires the same locally retained gold"
+  ]
+}
+
+````
+
+
+## test/config.cpu.yaml
+
+````yaml
+# 英文公开字幕的轻量真实 CPU 基线；生产默认配置仍为根目录 config.yaml。
+models:
+  embedding: BAAI/bge-small-en-v1.5
+  embedding_revision: 5c38ec7c405ec4b44b94cc5a9bb96e735b38267a
+  reranker: cross-encoder/ms-marco-MiniLM-L-6-v2
+  reranker_revision: 233902d25c440f23af6f7d6e94d2946bac0bee0a
+  device: cpu
+  offline: true
+  batch_size: 16
+  max_tokens: 256
+  rerank_tokens: 512
+chunking:
+  similarity_threshold: 0.65
+  min_seconds: 15
+  max_seconds: 60
+  gap_seconds: 10
+storage:
+  root: data/public_benchmark/index
+retrieval:
+  recall_k: 30
+  top_k: 5
+  rrf_k: 60
+
+````
+
+
+## test/download.py
+
+````python
+"""从公开原始页面按 manifest 下载；默认只取字幕，视频需显式 --mode video/both。"""
+import argparse
+import hashlib
+import json
+import re
+from pathlib import Path
+import subprocess
+import sys
+
+from core.io import write_json
+
+
+def load_manifest(path):
+    data = json.loads(Path(path).read_text(encoding='utf-8'))
+    videos = data['videos']
+    ids = [v['video_id'] for v in videos]
+    if len(ids) != len(set(ids)) or not 4 <= len(ids) <= 5:
+        raise ValueError('manifest 必须包含 4-5 个不重复视频')
+    for v in videos:
+        if not re.fullmatch(r'[A-Za-z0-9_-]{11}', v['video_id']):
+            raise ValueError('非法 YouTube ID')
+        if v['url'] != 'https://www.youtube.com/watch?v='+v['video_id']:
+            raise ValueError('本测试集只接受 manifest 中的 YouTube 原始页面')
+        if not 3600 <= v['duration_seconds'] <= 7200:
+            raise ValueError('测试视频时长须在 1-2 小时')
+    return videos
+
+
+def command(video, output, mode, system_ca=False):
+    args = [sys.executable, '-m', 'yt_dlp', '--no-playlist', '--socket-timeout', '15',
+        '--retries', '1', '--extractor-retries', '1', '--continue', '--no-overwrites',
+        '-o', str(Path(output)/'raw/%(id)s/%(id)s.%(ext)s')]
+    if system_ca:
+        args += ['--compat-options', 'no-certifi']  # 使用系统可信 CA，仍验证 TLS
+    if mode in {'subtitles', 'both'}:
+        args += ['--write-subs', '--write-auto-subs', '--sub-langs', 'en', '--sub-format', 'json3']
+    if mode == 'subtitles':
+        args += ['--skip-download']
+    else:
+        args += ['-f', 'bv*[height<=720]+ba/b[height<=720]', '--merge-output-format', 'mp4']
+    return args + [video['url']]
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--manifest', default='test/videos.json')
+    p.add_argument('--output', default='data/public_benchmark')
+    p.add_argument('--mode', choices=['subtitles', 'video', 'both'], default='subtitles')
+    p.add_argument('--system-ca', action='store_true', help='代理证书在系统 CA 时使用，不关闭 TLS 校验')
+    a = p.parse_args()
+    root = Path(a.output);root.mkdir(parents=True, exist_ok=True)
+    results = []
+    for video in load_manifest(a.manifest):
+        cached = root/'raw'/video['video_id']/(video['video_id']+'.en.json3')
+        if a.mode == 'subtitles' and cached.is_file():
+            try:
+                data=json.loads(cached.read_text(encoding='utf-8'))
+                if any(e.get('segs') for e in data.get('events', [])):
+                    results.append({'video_id':video['video_id'],'returncode':0,'success':True, 'cached':True,
+                        'subtitles':[{'file':str(cached),'bytes':cached.stat().st_size,'sha256':hashlib.sha256(cached.read_bytes()).hexdigest()}]})
+                    print(video['video_id'], '复用本地字幕', flush=True)
+                    continue
+            except (ValueError,OSError):
+                pass
+        log = root/(video['video_id']+'.download.log')
+        with log.open('w', encoding='utf-8') as f:
+            run = subprocess.run(command(video, root, a.mode, a.system_ca), stdout=f, stderr=subprocess.STDOUT)
+        files = list((root/'raw'/video['video_id']).glob('*.json3'))
+        valid = []
+        for file in files:
+            try:
+                data = json.loads(file.read_text(encoding='utf-8'))
+                if not any(e.get('segs') for e in data.get('events', [])):
+                    continue
+                valid.append({'file':str(file),'bytes':file.stat().st_size,
+                    'sha256':hashlib.sha256(file.read_bytes()).hexdigest()})
+            except (ValueError, OSError):
+                continue
+        ok = run.returncode == 0 and (bool(valid) if a.mode != 'video' else
+             any((root/'raw'/video['video_id']).glob('*.mp4')))
+        results.append({'video_id':video['video_id'],'returncode':run.returncode,
+                        'success':ok,'subtitles':valid,'log':str(log)})
+        print(video['video_id'], '成功' if ok else '失败，请查看本地日志', flush=True)
+    write_json(root/'downloads.json', results)
+    if not all(r['success'] for r in results):
+        raise SystemExit(1)
+
+
+if __name__ == '__main__':
+    main()
+
+````
+
+
+## test/prepare_corpus.py
+
+````python
+"""将本地 JSON3 字幕转成严格 JSONL；字幕测试不等同于 OCR/ASR 测试。"""
+import argparse
+import hashlib
+import html
+import json
+from pathlib import Path
+import re
+
+from core.io import write_json, write_rows
+from core.schema import Segment
+from test.download import load_manifest
+
+
+def convert_json3(data, video_id, duration):
+    lines = []
+    for event in data.get('events', []):
+        text = html.unescape(''.join(s.get('utf8', '') for s in event.get('segs', [])))
+        text = re.sub(r'\s+', ' ', text).strip()
+        if text:
+            lines.append((float(event['tStartMs'])/1000, event.get('dDurationMs'), text))
+    lines.sort(key=lambda x:x[0])
+    # 同一时刻的多个字幕事件合并；不同时间的相同话语不自动删去。
+    grouped = []
+    for start, length, text in lines:
+        if grouped and start == grouped[-1][0]:
+            prev = grouped.pop()
+            grouped.append((start, max(float(prev[1] or 0), float(length or 0)), prev[2]+' '+text))
+        else:
+            grouped.append((start, length, text))
+    rows = []
+    for i,(start,length,text) in enumerate(grouped):
+        next_start = grouped[i+1][0] if i+1 < len(grouped) else duration
+        end = min(duration, next_start, start+float(length)/1000 if length else next_start)
+        if end <= start:
+            continue
+        rows.append(Segment(video_id=video_id, text=text, start=start, end=end,
+                            timestamp_quality='estimated').model_dump())
+    if not rows:
+        raise ValueError('字幕未解析出有效片段')
+    return rows
+
+
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--manifest', default='test/videos.json')
+    p.add_argument('--root', default='data/public_benchmark')
+    p.add_argument('--allow-missing', action='store_true', help='显式允许部分语料试跑，报告记录缺失来源')
+    a = p.parse_args();root=Path(a.root)
+    all_rows, summary, missing = [], [], []
+    for v in load_manifest(a.manifest):
+        raw = root/'raw'/v['video_id']/(v['video_id']+'.en.json3')
+        if not raw.is_file():
+            if not a.allow_missing:
+                raise FileNotFoundError('缺少字幕，请先下载；部分试跑需显式 --allow-missing')
+            missing.append(v['video_id'])
+            continue
+        rows = convert_json3(json.loads(raw.read_text(encoding='utf-8')),v['video_id'],v['duration_seconds'])
+        write_rows(root/'segments'/(v['video_id']+'.jsonl'), rows)
+        summary.append({'video_id':v['video_id'],'duration_seconds':v['duration_seconds'],
+            'segments':len(rows),'characters':sum(len(r['text']) for r in rows),
+            'subtitle_sha256':hashlib.sha256(raw.read_bytes()).hexdigest()})
+        all_rows.extend(rows)
+    write_rows(root/'transcripts.jsonl', all_rows)
+    write_json(root/'corpus_stats.json', {'videos':summary,'total_segments':len(all_rows),
+        'total_duration_seconds':sum(v['duration_seconds'] for v in summary),
+        'missing_video_ids':missing,'complete_manifest':not missing,
+        'source':'public English captions; timestamp_quality=estimated'})
+    print(json.dumps(summary, indent=2))
+
+
+if __name__ == '__main__':
+    main()
+
+````
+
+
+## test/requirements.txt
+
+````text
+# 可选公开语料下载工具；RAG 推理另使用根目录 requirements.txt。
+yt-dlp>=2026.10.21,<2027
+
+````
+
+
+## test/run_benchmark.py
+
+````python
+"""真实 CPU 英文小模型基线；不将该结果冒充默认 BGE-M3/Ollama/OCR 效果。"""
+import argparse
+from pathlib import Path
+import json
+import time
+
+import torch
+
+from core.config import load_config
+from core.io import read_rows,write_json,write_rows
+from core.models import Embedder
+from core.sparse import vector
+from eval.run_eval import validate_gold,make_record,report,metrics
+from ingest.chunk import build_chunks
+from ingest.index import build_index
+from retrieve.rerank import Reranker
+from retrieve.search import Searcher,rrf
+
+
+def payloads(points):
+    return [{**p.payload,'retrieval_score':float(p.score)} for p in points]
+
+
+def main():
+    p=argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--config',default='test/config.cpu.yaml')
+    p.add_argument('--root',default='data/public_benchmark')
+    p.add_argument('--gold',default='data/public_benchmark/gold.jsonl')
+    p.add_argument('--build',action='store_true',help='仅首次或语料/配置变化时构建')
+    a=p.parse_args();cfg=load_config(a.config);root=Path(a.root)
+    torch.set_num_threads(4)
+    embedding=Embedder(cfg)
+    if a.build:
+        chunks=build_chunks(read_rows(root/'transcripts.jsonl'),embedding,cfg)
+        for c in chunks:
+            c.update(summary=c['text'].split('\n')[0],questions=[],enrichment_status='extractive_fallback')
+        write_rows(root/'chunks.jsonl',chunks)
+        build_index(chunks,cfg,embedding)
+        print(f'已建立真实向量/稀疏索引，{len(chunks)} 块；未启用生成问题增强',flush=True)
+    rows=validate_gold(read_rows(a.gold));reranker=Reranker(cfg);searcher=Searcher(cfg,embedding,reranker)
+    records=[];ablations={mode:[] for mode in ['dense','bm25','hybrid']};started=time.monotonic()
+    try:
+        for i,row in enumerate(rows,1):
+            # 全部视频参与竞争，禁止用 gold 的 video_id 偷做检索过滤。
+            dense=searcher.client.query_points(collection_name=searcher.collection,using='dense',
+                query=embedding.encode([row['query']],query=True)[0].tolist(),limit=30,with_payload=True).points
+            q=vector(row['query'],searcher.manifest['bm25'],query=True)
+            sparse=searcher.client.query_points(collection_name=searcher.collection,using='bm25',query=q,
+                limit=30,with_payload=True).points if q.indices else []
+            fused=rrf([dense,sparse],cfg.retrieval.rrf_k,30)
+            results=reranker.rerank(row['query'],fused,5)
+            records.append(make_record(row,fused,results))
+            if row['relevant']:
+                for name,hits in [('dense',payloads(dense)),('bm25',payloads(sparse)),('hybrid',fused)]:
+                    ablations[name].append({'at30':metrics(hits,row['relevant'],30),'at5':metrics(hits,row['relevant'],5)})
+            print(f'已评估 {i}/{len(rows)}',flush=True)
+    finally:searcher.close()
+    result=report(records)
+    result['ablations']={name:{stage:{metric:sum(r[stage][metric] for r in vals)/len(vals)
+        for metric in ['recall','mrr','hit']} for stage in ['at30','at5']} for name,vals in ablations.items() if vals}
+    result['elapsed_seconds']=time.monotonic()-started
+    result['conditions']={'embedding':cfg.models.embedding,'reranker':cfg.models.reranker,
+        'enrichment':'off; extractive_fallback','corpus':'downloaded English captions, all videos searched',
+        'labels':'agent_draft unless explicitly reviewed; provisional, not acceptance score',
+        'ocr_asr_tested':False}
+    write_json(root/'report.json',result);write_rows(root/'details.jsonl',records)
+    print(json.dumps(result['overall'],indent=2))
+
+
+if __name__=='__main__':main()
+
+````
+
+
+## test/urls.txt
+
+````text
+https://www.youtube.com/watch?v=xzRJOaqDMCg
+https://www.youtube.com/watch?v=7WC12HHC55E
+https://www.youtube.com/watch?v=95XrWA6-UFM
+https://www.youtube.com/watch?v=kBXYFaZ0EN0
+https://www.youtube.com/watch?v=s-jYxgKMqRc
+
+````
+
+
+## test/videos.json
+
+````json
+{
+  "schema_version": 1,
+  "purpose": "public_agent_development_benchmark",
+  "videos": [
+    {
+      "video_id": "xzRJOaqDMCg",
+      "url": "https://www.youtube.com/watch?v=xzRJOaqDMCg",
+      "title": "LangChain Tutorial for Beginners: Build Production-Ready AI Agents from Scratch in 99 Minutes",
+      "channel": "Zahiruddin Tavargere",
+      "duration_seconds": 5922,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "7WC12HHC55E",
+      "url": "https://www.youtube.com/watch?v=7WC12HHC55E",
+      "title": "1 Hour LangGraph Crash Course - From Zero To Hero - with Deep Search React Agent Project",
+      "channel": "Machine Learning With Hamza",
+      "duration_seconds": 3860,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "95XrWA6-UFM",
+      "url": "https://www.youtube.com/watch?v=95XrWA6-UFM",
+      "title": "Building Agentic and Multi-Agent Systems with LangGraph",
+      "channel": "Open Data Science and AI Conference",
+      "duration_seconds": 7167,
+      "language": "en",
+      "listed_caption_languages": [
+        "ar",
+        "bn",
+        "de-DE",
+        "en",
+        "fr-FR",
+        "hi",
+        "id",
+        "it",
+        "iw",
+        "ja",
+        "ko",
+        "ml",
+        "nl-NL",
+        "pl",
+        "pt-BR",
+        "ru",
+        "te",
+        "uk"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "kBXYFaZ0EN0",
+      "url": "https://www.youtube.com/watch?v=kBXYFaZ0EN0",
+      "title": "CrewAI Step-by-Step | Complete Course for Beginners",
+      "channel": "Alejandro AO",
+      "duration_seconds": 4063,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    },
+    {
+      "video_id": "s-jYxgKMqRc",
+      "url": "https://www.youtube.com/watch?v=s-jYxgKMqRc",
+      "title": "Master CrewAI: Your Ultimate Beginner's Guide!",
+      "channel": "Sam Witteveen",
+      "duration_seconds": 3618,
+      "language": "en",
+      "listed_caption_languages": [
+        "en"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22"
+    }
+  ],
+  "alternates": [
+    {
+      "video_id": "uD3wjGy7YL0",
+      "url": "https://www.youtube.com/watch?v=uD3wjGy7YL0",
+      "title": "The MCP Course You Need",
+      "channel": "Kubesimplify",
+      "duration_seconds": 7188,
+      "language": "en",
+      "listed_caption_languages": [
+        "de-DE",
+        "en",
+        "es-US",
+        "fr-FR",
+        "hi",
+        "pt-BR"
+      ],
+      "verification": "YouTube watch-page videoDetails and listed captionTracks",
+      "verified_date": "2026-10-22",
+      "cloud_subtitle_attempt": "HTTP 429; not included in this cloud run"
+    }
+  ]
+}
 
 ````
 
@@ -2902,7 +4034,7 @@ def test_legacy_end_is_estimated():
 
 def test_eval_recall_and_mrr():
     gold = [{'chunk_id': 'a'}, {'chunk_id': 'b'}]
-    assert metrics([{'chunk_id': 'a'}] * 2, gold, 5) == {'recall': .5, 'mrr': 1}
+    assert metrics([{'chunk_id': 'a'}] * 2, gold, 5) == {'recall': .5, 'mrr': 1, 'hit': 1.0}
     assert metrics([{'chunk_id': 'x'}, {'chunk_id': 'b'}], gold, 5)['mrr'] == .5
 
 def test_api_auth_validation_contract(monkeypatch, cfg):
@@ -2953,6 +4085,84 @@ def test_excerpt_must_be_complete_sentence(cfg):
     e = Enhancement(summary='设备校准', questions=[{'question': f'第{i}个问题是什么？', 'evidence': c.text} for i in range(3)])
     with pytest.raises(ValueError, match='摘要'):
         validate_enhancement(c.text, e)
+
+````
+
+
+## tests/test_public_benchmark.py
+
+````python
+"""公开语料工具与评估边界；全部使用虚构正文，不依赖网络。"""
+import pytest
+from eval.make_gold import source_index,locate,make_gold
+from eval.run_eval import validate_gold,metrics,make_record,report
+from test.prepare_corpus import convert_json3
+from test.download import load_manifest,command
+
+
+def seg(text,start=0,end=5,video='a'):
+    return {'video_id':video,'text':text,'start':start,'end':end}
+
+
+def test_manifest_has_five_verified_hour_long_sources():
+    videos=load_manifest('test/videos.json')
+    assert len(videos)==5 and all(3600<=v['duration_seconds']<=7200 for v in videos)
+    assert '--skip-download' in command(videos[0],'data','subtitles')
+    assert '--compat-options' in command(videos[0],'data','both',True)
+    assert '--no-check-certificates' not in command(videos[0],'data','both',True)
+
+
+def test_json3_handles_rolling_line_times_and_blank_events():
+    data={'events':[{'tStartMs':0,'dDurationMs':4000,'segs':[{'utf8':'Alpha'}]},
+        {'tStartMs':1990,'segs':[{'utf8':'\n'}]},
+        {'tStartMs':2000,'dDurationMs':4000,'segs':[{'utf8':'Beta'}]}]}
+    rows=convert_json3(data,'a',5)
+    assert [r['text'] for r in rows]==['Alpha','Beta']
+    assert rows[0]['end']==2 and rows[1]['end']==5
+    assert all(r['timestamp_quality']=='estimated' for r in rows)
+
+
+def test_time_locator_never_crosses_videos_or_large_gaps():
+    index=source_index([seg('Alpha'),seg('Beta',5,10),seg('Gamma',100,105),seg('Other',video='b')])
+    assert locate('Alpha Beta',index['a'])==(0,10)
+    with pytest.raises(ValueError):locate('Other',index['a'])
+    with pytest.raises(ValueError):locate('BetaGamma',index['a'])
+
+
+def test_ambiguous_quote_requires_hint():
+    index=source_index([seg('same'),seg('same',10,15)])
+    with pytest.raises(ValueError):locate('same',index['a'])
+    assert locate('same',index['a'],hint=12)==(10,15)
+
+
+def test_human_gate_and_unknown_evidence():
+    rows=[seg('Alpha supports a tool.')]
+    draft={'video_id':'a','query':'What can it use?','answer':'tool','evidence':['Alpha supports a tool.'],'type':'factual','reviewed':False}
+    gold,bad=make_gold(rows,[draft]);assert not gold and bad[0]['reason']=='human_review_required'
+    gold,_=make_gold(rows,[draft],True)
+    assert gold[0]['label_status']=='agent_draft'
+    assert gold[0]['relevant'][0]['start_ts']==0
+    assert 'video_ids' not in gold[0]  # 不把答案视频当查询过滤器
+    draft.update(reviewed=True,evidence=['invented fact'])
+    assert not make_gold(rows,[draft])[0]
+
+
+def test_unanswerable_allowed_but_not_in_recall_denominator():
+    row={'query':'Unknown?','type':'unanswerable','video_id':'a','relevant':[]}
+    assert validate_gold([row])
+    with pytest.raises(ValueError):metrics([],[],5)
+    hit={'chunk_id':'x','video_id':'a','start_ts':0,'end_ts':5,'text':'x','rerank_score':-2}
+    baseline=make_record(row,[hit],[hit]);reject=make_record(row,[hit],[hit],min_score=0)
+    assert report([baseline])['overall']['false_accept_rate']==1
+    assert report([reject],0)['overall']['false_accept_rate']==0
+    assert report([baseline])['overall']['metrics']=={}
+
+
+def test_recall_deduplicates_evidence_and_does_not_accept_one_second_only():
+    gold=[{'video_id':'a','start_ts':0,'end_ts':10}]
+    hit={'video_id':'a','start_ts':9,'end_ts':11}
+    assert metrics([hit],gold,5)['hit']==0
+    assert metrics([dict(hit,start_ts=5,end_ts=10)]*2,gold,5)['recall']==1
 
 ````
 

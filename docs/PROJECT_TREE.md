@@ -1,6 +1,6 @@
-# 新增/替换项目文件目录
+# 项目新增与升级文件目录
 
-workflow/ 为仓库已有内容，保留其现有文件；新增 OCR/ASR 通过 ocr 和 transcribe 入口使用。运行时数据与模型不提交。
+旧 workflow/ 保留。test/ 保存公开来源和通用评测工具；data/、模型、实际 gold 和媒体不提交。
 
 ```text
 video_rag/
@@ -30,6 +30,7 @@ video_rag/
 │   └── VALIDATION.md
 ├── eval/
 │   ├── __init__.py
+│   ├── make_gold.py
 │   ├── run_asr_eval.py
 │   └── run_eval.py
 ├── examples/
@@ -57,9 +58,23 @@ video_rag/
 ├── serve/
 │   ├── __init__.py
 │   └── api.py
+├── test/
+│   ├── CLOUD_RUN.md
+│   ├── QUESTION_PROMPT.md
+│   ├── README.md
+│   ├── __init__.py
+│   ├── cloud_run_summary.json
+│   ├── config.cpu.yaml
+│   ├── download.py
+│   ├── prepare_corpus.py
+│   ├── requirements.txt
+│   ├── run_benchmark.py
+│   ├── urls.txt
+│   └── videos.json
 ├── tests/
 │   ├── test_ocr_asr.py
-│   └── test_pipeline.py
+│   ├── test_pipeline.py
+│   └── test_public_benchmark.py
 ├── tools/
 │   ├── __init__.py
 │   └── prepare_models.py
@@ -68,4 +83,4 @@ video_rag/
     └── run.py
 ```
 
-运行时目录 data/、models/ 不提交；仓库已有 workflow/ 不在以上新增文件清单中。
+运行时 data/、models/ 不提交；仓库原有 workflow/ 不在以上新增/升级源码清单中。
