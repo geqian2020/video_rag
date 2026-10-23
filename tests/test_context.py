@@ -35,3 +35,47 @@ def test_raw_and_expanded_recall_differ():
 def test_unreconstructable_source_falls_back():
     chunks=fixture();hit={**chunks[1],'text':'unknown legacy text'}
     assert SourceContext(chunks).expand(hit,Settings(retrieval={'context_seconds':10}),len)==hit
+
+
+def test_expand_after_rerank_preserves_raw_scoring_and_expanded_evidence():
+    from threading import Lock
+    from retrieve.search import Searcher
+    chunks = fixture()
+    cfg = Settings(chunking={'min_seconds': 0, 'max_seconds': 15},
+                   retrieval={'context_seconds': 10, 'expand_after_rerank': True})
+    class Recorder:
+        def __init__(self): self.seen = None
+        def rerank(self, query, candidates, top_k):
+            self.seen = [c['text'] for c in candidates]
+            return [{**c, 'rerank_score': 1.0} for c in candidates[:top_k]]
+    class FakeEmbed:
+        token_count = staticmethod(len)
+    s = Searcher.__new__(Searcher)
+    s.cfg, s.lock, s.context, s.embedder = cfg, Lock(), SourceContext(chunks), FakeEmbed()
+    s.reranker = Recorder()
+    s._recall = lambda query, video_ids=None: chunks[:3]
+    out = s.search('what happens?', top_k=1, include_candidates=True)
+    assert s.reranker.seen == ['0', '5', '10']
+    assert out['results'][0]['text'] == '0\\n5\\n10'
+    assert out['results'][0]['rerank_score'] == 1.0
+    assert out['results'][0]['retrieved_start_ts'] == 0
+    assert out['candidates'][1]['retrieved_start_ts'] == 5
+
+
+def test_expand_after_rerank_disabled_has_existing_order():
+    from threading import Lock
+    from retrieve.search import Searcher
+    chunks = fixture()
+    cfg = Settings(chunking={'min_seconds': 0, 'max_seconds': 15},
+                   retrieval={'context_seconds': 10})
+    class Recorder:
+        def rerank(self, query, candidates, top_k):
+            assert candidates[1]['text'] == '0\\n5\\n10'
+            return [{**c, 'rerank_score': 1.0} for c in candidates[:top_k]]
+    class FakeEmbed:
+        token_count = staticmethod(len)
+    s = Searcher.__new__(Searcher)
+    s.cfg, s.lock, s.context, s.embedder = cfg, Lock(), SourceContext(chunks), FakeEmbed()
+    s.reranker = Recorder()
+    s._recall = lambda query, video_ids=None: [s.context.expand(h, cfg, len) for h in chunks[:3]]
+    assert s.search('what?', top_k=1)[0]['text'] == '0\\n5\\n10'
