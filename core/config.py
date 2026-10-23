@@ -54,6 +54,8 @@ class Storage(Strict):
 
 
 class Retrieval(Strict):
+    # Experiment: rank original chunks before expanding the selected evidence.
+    expand_after_rerank: bool = False
     context_seconds: float = Field(0, ge=0, le=60, allow_inf_nan=False)
     recall_k: int = Field(30, ge=30, le=200)
     top_k: int = Field(5, ge=1, le=30)
