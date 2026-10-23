@@ -25,6 +25,7 @@ storage:
   qdrant_url: null
   collection_prefix: video_rag
 retrieval:
+  context_seconds: 0  # 可选邻句扩展，默认关闭
   recall_k: 30
   top_k: 5
   rrf_k: 60
@@ -44,6 +45,7 @@ ocr:
   cls_model: null
   rec_keys: null
 asr:
+  prompt_style: terms
   model: small  # 或 D:/approved-models/small.pt
   model_cache: null
   device: cpu

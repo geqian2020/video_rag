@@ -1,0 +1,23 @@
+# 强模型组合对照。对照时用 --chunks 固定分块，报告不同 token 预算。
+models:
+  embedding: BAAI/bge-m3
+  embedding_revision: 5617a9f61b028005a4858fdac845db406aefb181
+  reranker: BAAI/bge-reranker-v2-m3
+  reranker_revision: 953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e
+  device: cpu
+  offline: true
+  batch_size: 8
+  max_tokens: 1024
+  rerank_tokens: 2048
+chunking:
+  similarity_threshold: 0.65
+  min_seconds: 15
+  max_seconds: 60
+  gap_seconds: 10
+storage:
+  root: data/public_benchmark/bge_index
+retrieval:
+  recall_k: 30
+  top_k: 5
+  rrf_k: 60
+  context_seconds: 10

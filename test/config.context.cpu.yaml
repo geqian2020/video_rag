@@ -1,0 +1,23 @@
+# 英文实验；不替代中文验收。当前权重必须已缓存。
+models:
+  embedding: BAAI/bge-small-en-v1.5
+  embedding_revision: 5c38ec7c405ec4b44b94cc5a9bb96e735b38267a
+  reranker: cross-encoder/ms-marco-MiniLM-L-6-v2
+  reranker_revision: 233902d25c440f23af6f7d6e94d2946bac0bee0a
+  device: cpu
+  offline: true
+  batch_size: 16
+  max_tokens: 256
+  rerank_tokens: 512
+chunking:
+  similarity_threshold: 0.65
+  min_seconds: 15
+  max_seconds: 60
+  gap_seconds: 10
+storage:
+  root: data/public_benchmark/expanded_index
+retrieval:
+  recall_k: 30
+  top_k: 5
+  rrf_k: 60
+  context_seconds: 10

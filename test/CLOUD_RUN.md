@@ -49,3 +49,5 @@
 gold SHA-256：`e35a2c0bd7e72c663cba842b8c626b4d70472e6af5efe2f53845e40b7293e63a`。gold 未公开，别人可下载同一语料建立自己的评测；完全复现本次分数还需要同一份已保留的 gold。
 
 机器可读的来源哈希、模型/依赖版本与分组结果见 cloud_run_summary.json；固定模型 revision 见 config.cpu.yaml。
+
+后续模型与媒体实验的历史汇总及本次恢复边界见 [OPTIMIZATION_RUN.md](OPTIMIZATION_RUN.md)。

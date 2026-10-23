@@ -1,0 +1,8 @@
+{
+  "source_page": "https://cs50.harvard.edu/ai/weeks/6/",
+  "reference_quality": "课程官方字幕；未独立逐字听写，切点可能产生参考误差。",
+  "cases": [
+    {"video_id":"cs50_word2vec","start":2130,"end":2190,"term":"word2vec"},
+    {"video_id":"cs50_transformers","start":3260,"end":3320,"term":"Transformers"}
+  ]
+}

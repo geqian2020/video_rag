@@ -64,16 +64,21 @@ def make_gold(segments,drafts,allow_unreviewed=False):
             if kind not in {'factual','howto','why','compare','unanswerable'}:raise ValueError('invalid_type')
             evidence=row.get('evidence',[])
             if isinstance(evidence,str):evidence=[evidence] if evidence.strip() else []
+            policy=row.get('evidence_policy','all')
+            if policy not in {'all','alternatives'}:raise ValueError('invalid_evidence_policy')
             relevant=[]
             if kind=='unanswerable':
                 if evidence or row.get('answer'):raise ValueError('unanswerable_must_have_empty_evidence_and_answer')
             else:
                 if not evidence or len(evidence)>3:raise ValueError('require_one_to_three_quotes')
                 for quote in evidence:
-                    start,end=locate(quote,index[video],row.get('evidence_start_hint'))
-                    relevant.append({'video_id':video,'start_ts':start,'end_ts':end,'evidence':quote})
+                    src=quote.get('video_id',video) if isinstance(quote,dict) else video
+                    hint=quote.get('start_hint') if isinstance(quote,dict) else row.get('evidence_start_hint')
+                    text=quote['quote'] if isinstance(quote,dict) else quote
+                    start,end=locate(text,index[src],hint)
+                    relevant.append({'video_id':src,'start_ts':start,'end_ts':end,'evidence':text})
             kept.append({'query':query,'answer':row.get('answer',''),'type':kind,'video_id':video,
-                'relevant':relevant,'reviewed':reviewed,'split':row.get('split','test'),
+                'relevant':relevant,'reviewed':reviewed,'split':row.get('split','unspecified'),'evidence_policy':policy,
                 'label_status':'human_reviewed' if reviewed else 'agent_draft'})
             seen.add(norm(query).casefold())
         except (ValueError,TypeError,KeyError,AttributeError) as exc:

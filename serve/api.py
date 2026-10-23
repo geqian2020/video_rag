@@ -30,6 +30,8 @@ class Hit(BaseModel):
     video_id: str
     start_ts: float
     end_ts: float
+    retrieved_start_ts: float | None = None
+    retrieved_end_ts: float | None = None
     text: str
     summary: str
     timestamp_quality: str

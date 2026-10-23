@@ -30,10 +30,14 @@ def normalize_key(term):
     return unicodedata.normalize('NFKC', term).casefold().strip()
 
 
+def confusable_key(term):
+    return normalize_key(term).translate(str.maketrans({'i':'1','l':'1','o':'0'}))
+
+
 def extract_terms(text):
     value = unicodedata.normalize('NFKC', text)
     # 英文缩写/产品词保留大小写、数字与连字符。不把 O/0、I/l 等混淆项自动改写。
-    out = set(re.findall(r'(?<![A-Za-z0-9])[A-Za-z][A-Za-z0-9]*(?:[-_+./][A-Za-z0-9]+)*', value))
+    out = set(re.findall(r'(?<![A-Za-z0-9])(?=[A-Za-z0-9_+./-]*[A-Za-z])[A-Za-z0-9]+(?:[-_+./][A-Za-z0-9]+)*', value))
     for word, flag in pseg.cut(value, HMM=False):
         if flag.startswith('n') and re.fullmatch(r'[\u4e00-\u9fff]{2,16}', word):
             out.add(word)
@@ -43,7 +47,7 @@ def extract_terms(text):
     return sorted(t for t in out if 2 <= len(t) <= 64)
 
 
-def candidates(rows, cfg):
+def candidates(rows, cfg, vocabulary=None):
     groups = {}
     for raw in rows:
         row = OCRLine.model_validate(raw)
@@ -78,6 +82,13 @@ def candidates(rows, cfg):
         peers = buckets.get((row['video_id'], len(term)), [])
         row['similar_candidates'] = ' | '.join(p for p in peers[:500]
             if p != term and SequenceMatcher(None, term.casefold(), p.casefold()).ratio() >= .75)[:500]
+    for row in output:
+        term=row['ocr_term'];ascii_term=bool(re.fullmatch(r'[A-Za-z0-9_+./-]+',term))
+        row['confusable_group']=(row['video_id']+':'+confusable_key(term)) if ascii_term else ''
+        confirmed=[e.term for e in (vocabulary.entries if vocabulary else [])
+                   if e.approved and (e.scope=='global' or e.video_id==row['video_id'])
+                   and confusable_key(e.term)==confusable_key(term)] if ascii_term else []
+        row['confirmed_spelling_suggestions']=' | '.join(sorted(set(confirmed)))
     return output
 
 
@@ -127,13 +138,14 @@ def main():
     make.add_argument('--input', required=True, action='append', help='OCR observations.jsonl；可重复指定')
     make.add_argument('--output', default='data/vocab_candidates.csv')
     make.add_argument('--config', default=None)
+    make.add_argument('--vocabulary',default=None,help='既有确认词库，仅提供混淆拼写建议')
     approve = subs.add_parser('approve')
     approve.add_argument('--review', required=True)
     approve.add_argument('--merge', default=None, help='合并已有词汇库，保留已确认词条')
     approve.add_argument('--output', default='data/vocabulary.json')
     a = p.parse_args()
     if a.command == 'candidates':
-        rows = candidates([r for file in a.input for r in read_rows(file)], load_config(a.config))
+        rows = candidates([r for file in a.input for r in read_rows(file)], load_config(a.config),load_vocabulary(a.vocabulary))
         export_csv(a.output, rows)
         print(f'已输出 {len(rows)} 条待审核候选；尚无条目被确认')
     else:

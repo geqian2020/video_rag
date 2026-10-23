@@ -9,6 +9,8 @@ from qdrant_client import models
 
 from core.config import load_config
 from core.models import Embedder, fingerprint
+from core.io import read_rows
+from retrieve.context import SourceContext
 from core.sparse import TOKENIZER_VERSION, vector
 from core.store import open_store
 from retrieve.rerank import Reranker
@@ -55,6 +57,8 @@ class Searcher:
             self.client.close()
             raise ValueError("索引 collection 不存在")
 
+        self.context = SourceContext(read_rows(folder / 'chunks.jsonl')) if cfg.retrieval.context_seconds else None
+
     def close(self):
         self.client.close()
 
@@ -70,7 +74,8 @@ class Searcher:
             sparse = self.client.query_points(collection_name=self.collection, using="bm25",
                 query=sparse_vector, query_filter=filt, limit=self.cfg.retrieval.recall_k,
                 with_payload=True).points
-        return rrf([dense, sparse], self.cfg.retrieval.rrf_k, self.cfg.retrieval.recall_k)
+        hits = rrf([dense, sparse], self.cfg.retrieval.rrf_k, self.cfg.retrieval.recall_k)
+        return [self.context.expand(h,self.cfg,self.embedder.token_count) for h in hits] if self.context else hits
 
     def search(self, query, top_k=None, video_ids=None, include_candidates=False):
         if not query.strip() or len(query) > 2000:

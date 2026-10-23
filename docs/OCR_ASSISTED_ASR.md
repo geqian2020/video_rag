@@ -133,3 +133,7 @@ python -m ingest.index
 所有 OCR/截图/词库/转录默认在 data 下，均不提交 Git；它们可能包含内部屏幕内容，应使用和视频相同的本地权限。OCR 与新转录入口只接受本地文件，ffmpeg/ffprobe 限制为 file/pipe 协议。新 OCR/ASR 为可选原生 Python 上游，本项目默认 Docker API 镜像未打入这些可选依赖。
 
 官方依据：[本地 Whisper transcribe 参数](https://github.com/openai/whisper/blob/main/whisper/transcribe.py)、[RapidOCR 项目](https://github.com/RapidAI/RapidOCR)。适配器另依据固定 1.4.4 wheel 中实际接口与内置模型验证，避免将新版文档接口混用于旧包。
+
+## 混淆审核与质量计数
+
+`ocr.vocab candidates --vocabulary data/vocabulary.json` 添加 I/l/1、O/0 同组待审和既有确认拼写建议，不自动 approved。ASR 评估另报术语出现次数与超出次数，后者仅为误插入代理。`asr.prompt_style` 默认 terms，英文不给中文标签；labeled 供对照。逐窗口保留 compression_ratio / avg_logprob / no_speech_prob 和需复核标志，不自动改写 ASR 输出。

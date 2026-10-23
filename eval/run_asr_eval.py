@@ -26,12 +26,16 @@ def distance(a, b):
     return previous[-1]
 
 
-def contains(text, term):
+def occurrences(text, term):
     text, term = unicodedata.normalize('NFKC', text).casefold(), unicodedata.normalize('NFKC', term).casefold()
     # PA 不应因为出现在 capacity 中而被当作正确术语。
     if re.fullmatch(r'[a-z0-9_+./-]+', term):
-        return bool(re.search(r'(?<![a-z0-9])'+re.escape(term)+r'(?![a-z0-9])', text))
-    return term in text
+        return len(re.findall(r'(?<![a-z0-9])'+re.escape(term)+r'(?![a-z0-9])', text))
+    return text.count(term)
+
+
+def contains(text, term):
+    return occurrences(text, term)>0
 
 
 def group(rows):
@@ -49,6 +53,8 @@ def evaluate(reference, hypothesis, vocab):
         raise ValueError('参考文本不能为空')
     edits = chars = expected_count = recognized_count = 0
     extra = {}
+    expected_occurrences = matched_occurrences = excess_occurrences = 0
+    if set(preds)-set(refs): raise ValueError('预测包含参考之外的 video_id/片段')
     for video_id, text in refs.items():
         ref, pred = normalize(text), normalize(preds.get(video_id, ''))
         if not ref or max(len(ref), len(pred)) > 5000:
@@ -62,9 +68,16 @@ def evaluate(reference, hypothesis, vocab):
         expected_count += len(expected)
         recognized_count += len(expected & found)
         extra[video_id] = sorted(found - expected)
+        for term in relevant:
+            nr,nh=occurrences(text,term),occurrences(preds.get(video_id,''),term)
+            expected_occurrences+=nr;matched_occurrences+=min(nr,nh);excess_occurrences+=max(0,nh-nr)
     return {'cer': edits / chars, 'term_recall': recognized_count / expected_count if expected_count else None,
             'expected_terms': expected_count, 'recognized_terms': recognized_count,
-            'extra_terms_not_in_reference': extra}
+            'extra_terms_not_in_reference': extra,'extra_term_types':sum(map(len,extra.values())),
+            'expected_term_occurrences':expected_occurrences,'matched_term_occurrences':matched_occurrences,
+            'term_occurrence_recall':matched_occurrences/expected_occurrences if expected_occurrences else None,
+            'excess_term_occurrences':excess_occurrences,
+            'occurrence_note':'片段级计数，超出次数仅作误插入代理，不能定位或判断词是否用对。'}
 
 
 def main():

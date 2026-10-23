@@ -54,6 +54,7 @@ class Storage(Strict):
 
 
 class Retrieval(Strict):
+    context_seconds: float = Field(0, ge=0, le=60, allow_inf_nan=False)
     recall_k: int = Field(30, ge=30, le=200)
     top_k: int = Field(5, ge=1, le=30)
     rrf_k: int = Field(60, ge=1)
@@ -83,6 +84,7 @@ class OCR(Strict):
 
 
 class ASR(Strict):
+    prompt_style: str = Field('terms', pattern='^(terms|labeled)$')
     # 已有 small.pt 路径或已缓存模型名；禁止缺失时自动下载。
     model: str = "small"
     model_cache: str | None = None

@@ -1,0 +1,74 @@
+{
+  "recorded_date": "2026-10-22",
+  "restored_date": "2026-10-23",
+  "provenance": "historical tool outputs in conversation; reconstructed summary, not recovered original report",
+  "real_models_rerun_on_restoration": false,
+  "extended_details_available": false,
+  "gold_sha256": null,
+  "human_reviewed": 0,
+  "questions": 80,
+  "answerable": 64,
+  "unanswerable": 16,
+  "corpus": {
+    "videos": 5,
+    "duration_seconds": 21673,
+    "segments": 8383,
+    "chunks": 805
+  },
+  "configurations": {
+    "light_context": {
+      "raw_recall30": 0.8125,
+      "context_coverage30": 0.921875,
+      "hit5": 0.859375,
+      "mrr5": 0.6333333333333333
+    },
+    "light_titles": {
+      "raw_recall30": 0.8125,
+      "context_coverage30": 0.921875,
+      "hit5": 0.84375,
+      "mrr5": 0.5973958333333333
+    },
+    "light_diversity": {
+      "raw_recall30": 0.8125,
+      "context_coverage30": 0.921875,
+      "hit5": 0.84375,
+      "mrr5": 0.63203125
+    },
+    "bge_context": {
+      "raw_recall30": 0.859375,
+      "context_coverage30": 0.9375,
+      "hit5": 0.90625,
+      "mrr5": 0.7609375,
+      "hit5_wilson95": [
+        0.810171204003544,
+        0.9563217474148016
+      ]
+    }
+  },
+  "models": {
+    "embedding": "BAAI/bge-m3",
+    "embedding_revision": "5617a9f61b028005a4858fdac845db406aefb181",
+    "reranker": "BAAI/bge-reranker-v2-m3",
+    "reranker_revision": "953dc6f6f85a1b2dbfca4c34a2796e7dde08d41e"
+  },
+  "asr_small": {
+    "audio_seconds": 120,
+    "baseline_cer": 0.039473684210526314,
+    "assisted_cer": 0.0729665071770335,
+    "baseline_term_occurrences": [
+      3,
+      4
+    ],
+    "assisted_term_occurrences": [
+      4,
+      4
+    ],
+    "reference_quality": "official captions; not independently transcribed"
+  },
+  "limits": [
+    "draft labels, previously inspected",
+    "different model token budgets",
+    "no company acceptance",
+    "original five-video detailed records and gold hash not recovered"
+  ]
+}

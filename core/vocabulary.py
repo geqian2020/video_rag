@@ -67,15 +67,18 @@ def build_prompt(vocab, video_id, start, end, cfg, token_count):
         candidates.append(entry)
     candidates.sort(key=lambda t: (t.scope != 'video', -t.priority, t.term.casefold()))
     selected, seen = [], set()
+    prefix, separator, suffix = ('Vocabulary: ', ', ', '.') if cfg.asr.language == 'en' else ('术语拼写：', '、', '。')
+    if cfg.asr.prompt_style == 'terms':
+        prefix = ''
     for entry in candidates:
         key = entry.term.casefold()
         if key in seen:
             continue
-        proposal = '术语拼写：' + '、'.join(selected + [entry.term]) + '。'
+        proposal = prefix + separator.join(selected + [entry.term]) + suffix
         if token_count(proposal) > cfg.asr.prompt_tokens:
             continue  # 不截断词或依赖 Whisper 在尾部静默裁切
         selected.append(entry.term)
         seen.add(key)
         if len(selected) >= cfg.asr.max_terms:
             break
-    return ('术语拼写：' + '、'.join(selected) + '。' if selected else ''), selected
+    return (prefix + separator.join(selected) + suffix if selected else ''), selected

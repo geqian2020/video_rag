@@ -25,3 +25,7 @@
 ## 最新：公开语料测试升级
 
 新增 test/ 下载/字幕转换/CPU 基线和 eval.make_gold；扩展 eval.run_eval 的无答案、Hit、分组与逐题诊断。当前回归测试 **41 passed**（两条依赖弃用提醒）。另实际运行 4 个公开视频的完整字幕、624 块、60 道草稿题的真实轻量 embedding + cross-encoder 检索，详情见 ../test/CLOUD_RUN.md。这项真实推理区别于早期测试替身；默认生产模型与 OCR/Whisper 验收边界不变。
+
+## 2026-10-23 恢复后验证
+
+实际重跑：57 passed，约 3.32 秒，一条上游测试客户端弃用提醒。包含 Qdrant/ffmpeg 与模型测试替身。没有重新跑真实 BGE、Whisper 或完整五视频 80 题；历史数字见 test/OPTIMIZATION_RUN.md，原始扩充明细未完整恢复。

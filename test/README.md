@@ -109,3 +109,40 @@ offline=true，不会因模型缺失自动下载。仅有 CPU 时，可先从 Py
 视频 OCR/Whisper 要另走 docs/OCR_ASSISTED_ASR.md，比较同段音频无词表/有词表的 CER、术语命中与误插词；完成后再对照检索效果。待检索稳定，最后由批准的工作台 LLM 做端到端正确性/忠实度/拒答抽测。
 
 官方工具资料：[yt-dlp](https://github.com/yt-dlp/yt-dlp)、[BGE small](https://huggingface.co/BAAI/bge-small-en-v1.5)、[MiniLM cross-encoder](https://huggingface.co/cross-encoder/ms-marco-MiniLM-L-6-v2)。
+
+## 恢复后的评估入口（2026-10-23）
+
+历史扩充结果与明细恢复边界见 [OPTIMIZATION_RUN.md](OPTIMIZATION_RUN.md)，当前完整规则见 [EVALUATION_PLAN](../docs/EVALUATION_PLAN.md)。本次实际重跑代码回归，未重新跑真实模型；不能用历史汇总替代新的独立验收。
+
+`urls.txt` 有 8 个历史参考链接；默认 manifest 只保留当前可用的 5 条早期元数据，新增 3 个网址应先重新核验标题、时长、字幕再加入。不要把链接清单当作下载完成记录。
+
+可选邻句扩展默认关闭：`retrieval.context_seconds: 10` 使用邻句，受 chunking.max_seconds 和 embedding token 预算约束，保留 retrieved_start_ts/end_ts 与扩展 start_ts/end_ts。API 和评估都保留原块与扩展的区别。
+
+```bash
+# 使用当前语料构建轻量基线；必须自己准备 gold 与已缓存的模型。
+python -m test.run_benchmark --config test/config.context.cpu.yaml --build \
+  --gold data/evaluation/gold.jsonl
+# 先把上述当前 chunks.jsonl 复制为 data/evaluation/frozen_chunks.jsonl，强模型只换组合：
+python -m test.run_benchmark --config test/config.bge.cpu.yaml --build \
+  --chunks data/evaluation/frozen_chunks.jsonl --gold data/evaluation/gold.jsonl \
+  --root data/public_benchmark/bge_trial
+# 复用同一批候选的独立实验：
+python -m test.replay_rerank --details data/public_benchmark/details.jsonl --mode titles \
+  --output data/public_benchmark/title_trial
+python -m test.replay_rerank --details data/public_benchmark/details.jsonl --mode diversity \
+  --output data/public_benchmark/diversity_trial
+```
+
+标题仅参与重排，不写回返回原文；时间去重从原排名向下补足，较短时间段重叠达到 50% 时抑制同视频重复，可能返回少于 5 条。两项均为实验入口，不作为默认设置。BGE 配置的 token 预算不同，需另做同预算对照才能归因于模型。
+
+真实媒体测试需从官方课程页自行取得许可范围内的视频与字幕，先准备可信本地模型：
+
+```bash
+python -m test.run_media_smoke --video /local/course.mp4 \
+  --subtitles /local/course.srt --whisper /local/models/small.pt
+python -m test.run_ocr_fixture --font /local/fonts/font.ttf
+python -m test.run_model_smoke --embedding /local/models/bge-m3 \
+  --reranker /local/models/bge-reranker-v2-m3
+```
+
+这些入口不自动下载模型。媒体、gold、术语词库与逐题结果放 data/，不提交 GitHub；公司资料只在批准的本地环境处理。

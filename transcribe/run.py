@@ -60,7 +60,12 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output):
                     continue
                 rows.append(Segment(video_id=video_id, start=absolute_start, end=absolute_end,
                                     text=text, timestamp_quality='asr').model_dump())
-            audit.append({'window_start': start, 'window_end': end, 'selected_terms': selected,
+            quality=[{k:seg.get(k) for k in ['compression_ratio','avg_logprob','no_speech_prob']}
+                     for seg in result.get('segments',[])]
+            review=any((q['compression_ratio'] is not None and q['compression_ratio']>2.4)
+                       or (q['avg_logprob'] is not None and q['avg_logprob'] < -1)
+                       or (q['no_speech_prob'] is not None and q['no_speech_prob'] > .6) for q in quality)
+            audit.append({'quality':quality,'review_required':review,'window_start': start, 'window_end': end, 'selected_terms': selected,
                           'prompt_tokens': token_count(prompt) if prompt else 0,
                           'segment_count': len(result.get('segments', []))})
             print(f'转录已完成窗口 {i+1}', flush=True)
@@ -71,6 +76,7 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output):
     audit_path = str(output) + '.audit.json'
     write_json(audit_path, {'video_id': video_id, 'model': cfg.asr.model,
         'mode': 'vocabulary_assisted' if any(w['selected_terms'] for w in audit) else 'no_terms_selected',
+        'prompt_style':cfg.asr.prompt_style,'review_required_windows':sum(w['review_required'] for w in audit),
         'warning': '提示词仅影响识别偏好；不证明音频确实说了术语，需抽查', 'windows': audit,
         'transcript_sha256': hashlib.sha256(Path(output).read_bytes()).hexdigest()})
     return rows
