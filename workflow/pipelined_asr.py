@@ -28,6 +28,13 @@ from core.media import probe
 from workflow import transcript_registry as registry
 
 
+def default_temp_root(platform: str | None = None) -> Path:
+    """Use C:/temp on Windows; never rely on corporate LOCALAPPDATA."""
+    import tempfile
+    name = platform if platform is not None else os.name
+    return Path('C:/temp') if name == 'nt' else Path(tempfile.gettempdir())
+
+
 @dataclass(frozen=True)
 class Video:
     path: Path
@@ -59,15 +66,23 @@ class Pipeline:
         self.interval = interval
         self.stop = stop or threading.Event()
         self.registry = data / 'transcript_registry.json'
-        # Keep all pipeline-generated files under the user-configured DATA_IN.
-        # Never assume the corporate machine allows writes under LOCALAPPDATA.
-        # The user controls synchronization by choosing DATA_IN outside OneDrive.
-        private_root = data / 'temp'
+        # All generated temporary audio lives under C:/temp on Windows,
+        # independent of the OneDrive-backed DATA_IN location. Do not access
+        # LOCALAPPDATA on corporate machines. RAG_TEMP_ROOT permits explicit
+        # override for other systems and isolated tests.
+        temp_root = Path(os.getenv('RAG_TEMP_ROOT') or default_temp_root())
+        private_root = temp_root / 'video_rag'
         self.stage_dir = private_root / 'audio_stage'
         self.window_temp = private_root / 'asr_windows'
-        self.window_temp.mkdir(parents=True, exist_ok=True)
         self.logs = data / 'logs'
-        self.stage_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            # Creates C:/temp too if it does not exist.
+            self.stage_dir.mkdir(parents=True, exist_ok=True)
+            self.window_temp.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            raise RuntimeError(
+                f'Cannot create temporary audio directories under {temp_root}: {exc}. '
+                'Check C:/temp access permissions.') from exc
         self.logs.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self.log_file = self.logs / ('pipeline-' + datetime.now().strftime('%Y%m%d-%H%M%S') + '.log')
