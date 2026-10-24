@@ -75,7 +75,7 @@ class Searcher:
                 query=sparse_vector, query_filter=filt, limit=self.cfg.retrieval.recall_k,
                 with_payload=True).points
         hits = rrf([dense, sparse], self.cfg.retrieval.rrf_k, self.cfg.retrieval.recall_k)
-        return [self.context.expand(h,self.cfg,self.embedder.token_count) for h in hits] if self.context else hits
+        return [self.context.expand(h,self.cfg,self.embedder.token_count) for h in hits] if self.context and not self.cfg.retrieval.expand_after_rerank else hits
 
     def search(self, query, top_k=None, video_ids=None, include_candidates=False):
         if not query.strip() or len(query) > 2000:
@@ -88,6 +88,12 @@ class Searcher:
         with self.lock:
             candidates = self._recall(query, video_ids)
             results = self.reranker.rerank(query, candidates, top_k)
+            if self.context and self.cfg.retrieval.expand_after_rerank:
+                # Rank the unmodified chunks, then enlarge the evidence.
+                # Expand all candidates as well for comparable coverage@30.
+                expand = lambda hit: self.context.expand(hit, self.cfg, self.embedder.token_count)
+                candidates = [expand(hit) for hit in candidates]
+                results = [expand(hit) for hit in results]
         if include_candidates:
             return {"results": results, "candidates": candidates}
         return results
