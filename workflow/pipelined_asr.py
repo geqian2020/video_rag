@@ -59,12 +59,12 @@ class Pipeline:
         self.interval = interval
         self.stop = stop or threading.Event()
         self.registry = data / 'transcript_registry.json'
-        # Keep large WAV staging and short Whisper audio windows outside OneDrive,
-        # even when the user's DATA_IN still sits in a synced Desktop folder.
-        local_root = os.getenv('LOCALAPPDATA')
-        private_root = Path(local_root) / 'VideoRag' if local_root else data / 'temp'
-        self.stage_dir = Path(os.getenv('RAG_AUDIO_STAGE_DIR') or str(private_root / 'audio_stage'))
-        self.window_temp = private_root / 'temp'
+        # Keep all pipeline-generated files under the user-configured DATA_IN.
+        # Never assume the corporate machine allows writes under LOCALAPPDATA.
+        # The user controls synchronization by choosing DATA_IN outside OneDrive.
+        private_root = data / 'temp'
+        self.stage_dir = private_root / 'audio_stage'
+        self.window_temp = private_root / 'asr_windows'
         self.window_temp.mkdir(parents=True, exist_ok=True)
         self.logs = data / 'logs'
         self.stage_dir.mkdir(parents=True, exist_ok=True)
@@ -138,7 +138,7 @@ class Pipeline:
         except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
             raise RuntimeError(
                 f'Cannot write audio to {self.stage_dir}: {exc}. '
-                'Set RAG_AUDIO_STAGE_DIR to an existing writable local directory, e.g. C:/video_rag_audio_stage.') from exc
+                'Check DATA_IN and permissions for its temp/audio_stage directory.') from exc
         finally:
             raw.unlink(missing_ok=True)
             sample.unlink(missing_ok=True)
