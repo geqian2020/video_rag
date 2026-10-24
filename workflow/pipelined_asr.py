@@ -125,7 +125,7 @@ class Pipeline:
         raw = self.stage_dir / ('.preflight-' + str(os.getpid()) + '.pcm')
         sample = self.stage_dir / ('.preflight-' + str(os.getpid()) + '.wav')
         try:
-            raw.write_bytes(b'\\x00' * 320)
+            raw.write_bytes(bytes(320))
             test = subprocess.run(
                 [self.ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error',
                  '-f', 's16le', '-ar', '16000', '-ac', '1', '-i', str(raw),
@@ -160,36 +160,48 @@ class Pipeline:
         errlog = self.logs / ('extract-' + video.id + '.log')
         rc = None
         try:
-            with errlog.open('wb') as err:
-                proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err)
-                try:
-                    while True:
-                        try:
-                            rc = proc.wait(timeout=self.interval)
-                            break
-                        except subprocess.TimeoutExpired:
-                            if self.stop.is_set():
-                                proc.terminate()
-                                raise InterruptedError('Stopped during audio prefetch')
-                            # FFmpeg can spend minutes hydrating the OneDrive input
-                            # before it first opens its output WAV. Restore the local
-                            # output directory if an external process removed it meanwhile.
-                            if not self.stage_dir.is_dir():
-                                self.log(f'[PREFETCH] 本地输出目录消失，立即重建：{self.stage_dir}')
-                                self.stage_dir.mkdir(parents=True, exist_ok=True)
-                            size = partial.stat().st_size if partial.exists() else 0
-                            self.log(f'[PREFETCH] {video.relative}: {time.monotonic()-begun:.0f}s, '
-                                     f'本地已写音轨 {size/1048576:.1f} MiB（不是视频下载百分比）')
-                finally:
-                    if proc.poll() is None:
-                        proc.terminate()
-                        try:
-                            proc.wait(timeout=5)
-                        except subprocess.TimeoutExpired:
-                            proc.kill()
-                            proc.wait()
-            if rc != 0:
+            for attempt in range(2):
+                if attempt:
+                    # Only output-path failures get one retry. The cloud input
+                    # may have hydrated already, so the second attempt is cheap.
+                    self._stage_verified = False
+                    self.ensure_stage_writable()
+                    partial.unlink(missing_ok=True)
+                with errlog.open('wb') as err:
+                    proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err)
+                    try:
+                        while True:
+                            try:
+                                rc = proc.wait(timeout=self.interval)
+                                break
+                            except subprocess.TimeoutExpired:
+                                if self.stop.is_set():
+                                    proc.terminate()
+                                    raise InterruptedError('Stopped during audio prefetch')
+                                # Cloud hydration can finish minutes after FFmpeg
+                                # starts. Restore the destination before it opens.
+                                if not self.stage_dir.is_dir():
+                                    self.log(f'[PREFETCH] 本地输出目录消失，立即重建：{self.stage_dir}')
+                                    self.stage_dir.mkdir(parents=True, exist_ok=True)
+                                size = partial.stat().st_size if partial.exists() else 0
+                                self.log(f'[PREFETCH] {video.relative}: {time.monotonic()-begun:.0f}s, '
+                                         f'本地已写音轨 {size/1048576:.1f} MiB（不是视频下载百分比）')
+                    finally:
+                        if proc.poll() is None:
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=5)
+                            except subprocess.TimeoutExpired:
+                                proc.kill()
+                                proc.wait()
+                if rc == 0:
+                    break
                 details = errlog.read_text(encoding='utf-8', errors='replace')[-1800:]
+                is_output_missing = ('Error opening output' in details
+                                     and 'No such file or directory' in details)
+                if attempt == 0 and is_output_missing:
+                    self.log('[PREFETCH] FFmpeg 输出路径失效；重建目录并且仅重试一次')
+                    continue
                 raise RuntimeError(f'Audio extraction failed (ffmpeg rc={rc}): {details}')
             duration = probe(partial)['duration']
             if duration <= 0:
