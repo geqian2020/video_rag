@@ -103,3 +103,76 @@ def test_completed_audio_staging_survives_missing_cloud_video(monkeypatch, tmp_p
     assert pipeline.prepare_audio(videos[0]) == wav
     pipeline.cleanup_audio(videos[0])
     assert not wav.exists()
+
+
+def test_stage_dir_recreated_while_cloud_input_is_slow(monkeypatch, tmp_path):
+    """Regression: FFmpeg waited on OneDrive, output directory vanished."""
+    if not shutil.which('ffmpeg'):
+        pytest.skip('FFmpeg unavailable for output-path smoke test')
+    import workflow.pipelined_asr as module
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    source, data, videos = _plan(tmp_path, ['demo.mp4'])
+    pipeline = Pipeline(source, data, videos, interval=.01)
+    monkeypatch.setattr(module, 'probe', lambda _: {'duration': 1.0})
+
+    class Hydrating:
+        def __init__(self, cmd, stdin, stdout, stderr):
+            self.output = Path(cmd[-1])
+            self.iteration = 0
+            self.finished = False
+            shutil.rmtree(self.output.parent)  # folder removed during cloud read
+
+        def wait(self, timeout=None):
+            if not self.iteration:
+                self.iteration = 1
+                raise subprocess.TimeoutExpired('ffmpeg', timeout)
+            assert self.output.parent.is_dir()
+            self.output.write_bytes(b'RIFF' + bytes(128))
+            self.finished = True
+            return 0
+
+        def poll(self):
+            return 0 if self.finished else None
+
+        def terminate(self):
+            self.finished = True
+
+    monkeypatch.setattr(module.subprocess, 'Popen', Hydrating)
+    wav = pipeline.prepare_audio(videos[0])
+    assert wav.is_file()
+    assert wav.stat().st_size > 44
+    assert pipeline.prepared(videos[0])
+
+
+def test_retry_once_on_missing_ffmpeg_output_path(monkeypatch, tmp_path):
+    """A missing output directory must trigger one retry, not skip the video."""
+    if not shutil.which('ffmpeg'):
+        pytest.skip('FFmpeg unavailable for output-path smoke test')
+    import workflow.pipelined_asr as module
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'local'))
+    source, data, videos = _plan(tmp_path, ['demo.mp4'])
+    pipeline = Pipeline(source, data, videos, interval=.01)
+    monkeypatch.setattr(module, 'probe', lambda _: {'duration': 1.0})
+    attempts = []
+
+    class IntermittentOutput:
+        def __init__(self, cmd, stdin, stdout, stderr):
+            attempts.append(1)
+            self.output = Path(cmd[-1])
+            self.err = stderr
+
+        def wait(self, timeout=None):
+            if len(attempts) == 1:
+                self.err.write(b'Error opening output file: No such file or directory\\n')
+                return 2
+            self.output.write_bytes(b'RIFF' + bytes(128))
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(module.subprocess, 'Popen', IntermittentOutput)
+    wav = pipeline.prepare_audio(videos[0])
+    assert wav.is_file()
+    assert len(attempts) == 2
+    assert pipeline.prepared(videos[0])
