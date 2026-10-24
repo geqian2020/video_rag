@@ -256,6 +256,8 @@ class Pipeline:
                         if not registry.reuse(str(self.registry), v.basename, str(v.transcript), v.video_id):
                             raise RuntimeError('Filename registry reuse failed: ' + v.relative)
                     reused += 1
+                    # Metadata-only unpin request; never open or delete cloud media.
+                    self.release_original(v)
                 self.log(f'[CACHE] 命中：{group.basename}；复用 {len(group.videos)} 个来源，未下载原视频')
             else:
                 pending.append(group)
@@ -289,6 +291,7 @@ class Pipeline:
                                               str(duplicate.transcript), duplicate.video_id):
                             raise RuntimeError('Cannot publish duplicate provenance: ' + duplicate.relative)
                         reused += 1
+                        self.release_original(duplicate)
                     self.log(f'[SUCCESS] {group.basename}: 新转录 1 个，另有 {len(group.videos)-1} 个同名来源已复用')
                 return {'new': new, 'reused': reused, 'sources': len(self.videos),
                         'unique_names': len(groups)}
