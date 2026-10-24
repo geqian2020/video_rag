@@ -39,10 +39,12 @@ def test_old_complete_and_same_filename_never_read_cloud(monkeypatch, tmp_path):
     pipeline = Pipeline(source, data, videos, interval=.01)
     monkeypatch.setattr(pipeline, 'prepare_audio',
                         lambda v: pytest.fail('Must not read cloud media'))
+    released = []
     monkeypatch.setattr(pipeline, 'release_original',
-                        lambda v: pytest.fail('Must not hydrate cloud media'))
+                        lambda v: released.append(v.relative))
     summary = pipeline.process()
     assert summary['new'] == 0 and summary['reused'] == 2
+    assert len(released) == 2  # attrib-only requests, no media bytes read
     assert all(pipeline.is_complete(v) for v in videos)
     assert videos[0].video_id in videos[0].transcript.read_text(encoding='utf-8')
 
@@ -79,7 +81,8 @@ def test_only_one_serial_prefetch_with_foreground_asr(monkeypatch, tmp_path):
     result = pipeline.process()
     assert result == {'new': 3, 'reused': 1, 'sources': 4, 'unique_names': 3}
     assert maximum[0] == 1
-    assert len(prepared) == len(transcribed) == len(released) == len(cleaned) == 3
+    assert len(prepared) == len(transcribed) == len(cleaned) == 3
+    assert len(released) == 4  # includes the completed same-name duplicate
     assert all(pipeline.is_complete(v) for v in videos)
 
 
