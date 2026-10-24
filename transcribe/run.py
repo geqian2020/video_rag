@@ -84,10 +84,13 @@ def _read_window_checkpoint(path, fingerprint, video_id, start, end):
         return None
 
 
-def transcribe_video(video, video_id, vocab, cfg, model, token_count, output):
+def transcribe_video(video, video_id, vocab, cfg, model, token_count, output, audio_source=None):
     if not video_id.strip():
         raise ValueError('video_id 不可为空')
-    duration = probe(video)['duration']
+    # A prepared local audio source prevents repeated reads of a OneDrive cloud video.
+    # The original video identity is retained for window checkpoint fingerprints.
+    media_for_audio = local_media(audio_source) if audio_source is not None else video
+    duration = probe(media_for_audio)['duration']
     rows, audit = [], []
     checkpoints = Path(str(output) + '.windows')
     with tempfile.TemporaryDirectory(prefix='video-kb-asr-') as temp:
@@ -104,7 +107,7 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output):
                 continue
 
             audio = Path(temp) / 'window.wav'
-            extract_audio(video, audio, start, end)
+            extract_audio(media_for_audio, audio, start, end)
             kwargs = {'language': cfg.asr.language, 'task': 'transcribe', 'verbose': False,
                 'fp16': cfg.asr.device.startswith('cuda'), 'condition_on_previous_text': False,
                 'temperature': 0.0, 'initial_prompt': prompt or None, 'carry_initial_prompt': True}
@@ -159,6 +162,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--video', required=True)
     p.add_argument('--video-id', required=True)
+    p.add_argument('--audio-source', default=None,
+                   help='Prepared local PCM audio; preserves original --video identity and window checkpoints')
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument('--vocabulary', help='仅加载 approved=true 的词汇')
     mode.add_argument('--no-vocab', action='store_true', help='无词表基线，供同段音频对比')
@@ -176,7 +181,8 @@ def main():
                               language=cfg.asr.language, task='transcribe')
     cfg.asr.prompt_tokens = min(cfg.asr.prompt_tokens, model.dims.n_text_ctx//2 - 16)
     count = lambda text: len(tokenizer.encode(' ' + text.strip()))
-    transcribe_video(video, a.video_id, vocab, cfg, model, count, a.output)
+    transcribe_video(video, a.video_id, vocab, cfg, model, count, a.output,
+                     audio_source=a.audio_source)
     log_progress('转录完成；输出 JSONL 与 .audit.json，可继续 ingest.chunk')
 
 
