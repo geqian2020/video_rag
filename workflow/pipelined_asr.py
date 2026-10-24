@@ -116,11 +116,40 @@ class Pipeline:
         except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError):
             return False
 
+
+    def ensure_stage_writable(self):
+        """Fail fast if FFmpeg cannot create WAV files at the actual output path."""
+        self.stage_dir.mkdir(parents=True, exist_ok=True)
+        if getattr(self, '_stage_verified', False):
+            return
+        raw = self.stage_dir / ('.preflight-' + str(os.getpid()) + '.pcm')
+        sample = self.stage_dir / ('.preflight-' + str(os.getpid()) + '.wav')
+        try:
+            raw.write_bytes(b'\\x00' * 320)
+            test = subprocess.run(
+                [self.ffmpeg, '-nostdin', '-hide_banner', '-loglevel', 'error',
+                 '-f', 's16le', '-ar', '16000', '-ac', '1', '-i', str(raw),
+                 '-c:a', 'pcm_s16le', '-f', 'wav', '-y', str(sample)],
+                capture_output=True, text=True, errors='replace', timeout=20)
+            if test.returncode or not sample.is_file() or sample.stat().st_size < 44:
+                raise RuntimeError(test.stderr[-1500:] or 'FFmpeg did not create preflight WAV')
+            self._stage_verified = True
+            self.log(f'[PREFETCH] 输出目录预检通过：{self.stage_dir}')
+        except (OSError, subprocess.TimeoutExpired, RuntimeError) as exc:
+            raise RuntimeError(
+                f'Cannot write audio to {self.stage_dir}: {exc}. '
+                'Set RAG_AUDIO_STAGE_DIR to an existing writable local directory, e.g. C:/video_rag_audio_stage.') from exc
+        finally:
+            raw.unlink(missing_ok=True)
+            sample.unlink(missing_ok=True)
+
     def prepare_audio(self, video: Video) -> Path:
         wav, meta = self.stage_paths(video)
         if self.prepared(video):
             self.log(f'[PREFETCH] 复用已准备的本地音轨：{video.relative} | {wav.stat().st_size / 1048576:.1f} MiB')
             return wav
+        # Validate the same output directory with FFmpeg BEFORE any cloud file read.
+        self.ensure_stage_writable()
         partial = wav.with_suffix('.partial.wav')
         partial.unlink(missing_ok=True)
         self.log(f'[PREFETCH] 开始顺序读取并提取音轨：{video.relative}')
@@ -142,6 +171,12 @@ class Pipeline:
                             if self.stop.is_set():
                                 proc.terminate()
                                 raise InterruptedError('Stopped during audio prefetch')
+                            # FFmpeg can spend minutes hydrating the OneDrive input
+                            # before it first opens its output WAV. Restore the local
+                            # output directory if an external process removed it meanwhile.
+                            if not self.stage_dir.is_dir():
+                                self.log(f'[PREFETCH] 本地输出目录消失，立即重建：{self.stage_dir}')
+                                self.stage_dir.mkdir(parents=True, exist_ok=True)
                             size = partial.stat().st_size if partial.exists() else 0
                             self.log(f'[PREFETCH] {video.relative}: {time.monotonic()-begun:.0f}s, '
                                      f'本地已写音轨 {size/1048576:.1f} MiB（不是视频下载百分比）')
