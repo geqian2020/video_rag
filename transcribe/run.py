@@ -13,6 +13,16 @@ from core.schema import Segment
 from core.vocabulary import build_prompt, load_vocabulary
 
 
+def log_progress(message):
+    """A console encoding error must never abort a successful ASR window."""
+    try:
+        print(message, flush=True)
+    except UnicodeEncodeError:
+        # Some Windows redirected streams default to cp1252 instead of UTF-8.
+        # Use ASCII escapes as a fallback; do not suppress other I/O failures.
+        print(message.encode('ascii', errors='backslashreplace').decode('ascii'), flush=True)
+
+
 def load_local_whisper(cfg):
     import whisper
     name = cfg.asr.model
@@ -68,7 +78,7 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output):
             audit.append({'quality':quality,'review_required':review,'window_start': start, 'window_end': end, 'selected_terms': selected,
                           'prompt_tokens': token_count(prompt) if prompt else 0,
                           'segment_count': len(result.get('segments', []))})
-            print(f'转录已完成窗口 {i+1}', flush=True)
+            log_progress(f'转录已完成窗口 {i+1}')
     if not rows:
         raise ValueError('未识别到有效语音；未发布新转录，请检查音轨与模型')
     # 首先保留本次完整输出；无任何字符串替换，不将 OCR 原文作为 spoken evidence。
@@ -104,7 +114,7 @@ def main():
     cfg.asr.prompt_tokens = min(cfg.asr.prompt_tokens, model.dims.n_text_ctx//2 - 16)
     count = lambda text: len(tokenizer.encode(' ' + text.strip()))
     transcribe_video(video, a.video_id, vocab, cfg, model, count, a.output)
-    print('转录完成；输出 JSONL 与 .audit.json，可继续 ingest.chunk')
+    log_progress('转录完成；输出 JSONL 与 .audit.json，可继续 ingest.chunk')
 
 
 if __name__ == '__main__':
