@@ -98,7 +98,7 @@ def test_completed_audio_staging_survives_missing_cloud_video(monkeypatch, tmp_p
     pipeline = Pipeline(source, data, videos, interval=.05)
     wav = pipeline.prepare_audio(videos[0])
     assert wav.is_file() and pipeline.prepared(videos[0])
-    assert str(wav).startswith(str(tmp_path / 'local'))
+    assert str(wav).startswith(str(data / 'temp' / 'audio_stage'))
     mp4.unlink()  # local test: cloud no longer available; reuse only cached WAV
     assert pipeline.prepare_audio(videos[0]) == wav
     pipeline.cleanup_audio(videos[0])
@@ -176,3 +176,17 @@ def test_retry_once_on_missing_ffmpeg_output_path(monkeypatch, tmp_path):
     assert wav.is_file()
     assert len(attempts) == 2
     assert pipeline.prepared(videos[0])
+
+
+def test_audio_paths_follow_configured_data_root_not_appdata(monkeypatch, tmp_path):
+    """Corporate machines may deny LOCALAPPDATA; DATA_IN owns all temp files."""
+    monkeypatch.setenv('LOCALAPPDATA', str(tmp_path / 'it-restricted'))
+    monkeypatch.setenv('RAG_AUDIO_STAGE_DIR', str(tmp_path / 'stale-override'))
+    source, data, videos = _plan(tmp_path, ['video.mp4'])
+    pipeline = Pipeline(source, data, videos, interval=.01)
+    assert pipeline.stage_dir == data / 'temp' / 'audio_stage'
+    assert pipeline.window_temp == data / 'temp' / 'asr_windows'
+    assert pipeline.stage_dir.is_dir()
+    assert pipeline.window_temp.is_dir()
+    assert not (tmp_path / 'it-restricted').exists()
+    assert not (tmp_path / 'stale-override').exists()
