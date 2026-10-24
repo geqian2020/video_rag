@@ -12,6 +12,7 @@ import os
 from pathlib import Path
 import sys
 from core.io import atomic_text, write_json, write_rows
+from core.config import load_config
 
 
 def valid(path):
@@ -25,7 +26,10 @@ def valid(path):
         if not rows or not all(x.get("video_id") and x.get("text") and
                                float(x["end"]) > float(x["start"]) for x in rows):
             return False
-        return info.get("transcript_sha256") == hashlib.sha256(p.read_bytes()).hexdigest()
+        cfg = load_config()
+        return (info.get("transcript_sha256") == hashlib.sha256(p.read_bytes()).hexdigest()
+                and info.get("model") == cfg.asr.model
+                and info.get("prompt_style") == cfg.asr.prompt_style)
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return False
 
