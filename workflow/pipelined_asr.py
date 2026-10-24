@@ -59,7 +59,13 @@ class Pipeline:
         self.interval = interval
         self.stop = stop or threading.Event()
         self.registry = data / 'transcript_registry.json'
-        self.stage_dir = data / 'temp' / 'audio_stage'
+        # Keep large WAV staging and short Whisper audio windows outside OneDrive,
+        # even when the user's DATA_IN still sits in a synced Desktop folder.
+        local_root = os.getenv('LOCALAPPDATA')
+        private_root = Path(local_root) / 'VideoRag' if local_root else data / 'temp'
+        self.stage_dir = Path(os.getenv('RAG_AUDIO_STAGE_DIR') or str(private_root / 'audio_stage'))
+        self.window_temp = private_root / 'temp'
+        self.window_temp.mkdir(parents=True, exist_ok=True)
         self.logs = data / 'logs'
         self.stage_dir.mkdir(parents=True, exist_ok=True)
         self.logs.mkdir(parents=True, exist_ok=True)
@@ -175,7 +181,9 @@ class Pipeline:
         self.log(f'[ASR] 开始：{video.relative} | 复用窗口检查点；日志 {logfile}')
         with logfile.open('wb') as f:
             proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=f, stderr=subprocess.STDOUT,
-                                    env={**os.environ, 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8'})
+                                    env={**os.environ, 'PYTHONUTF8': '1', 'PYTHONIOENCODING': 'utf-8',
+                                         'TEMP': str(self.window_temp), 'TMP': str(self.window_temp),
+                                         'TMPDIR': str(self.window_temp)})
             try:
                 previous_size = 0
                 while True:
