@@ -1,5 +1,8 @@
 """No real browser or model is launched by these tests."""
 import threading
+import os
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -97,3 +100,26 @@ def test_open_browser_mode_cleans_up_after_interrupt(monkeypatch, tmp_path):
     with pytest.raises(KeyboardInterrupt):
         main()
     worker.join.assert_called_once_with(timeout=1)
+
+
+def test_direct_script_works_from_other_cwd_with_safe_path(tmp_path):
+    repo = Path(__file__).resolve().parents[1]
+    root = tmp_path / "existing index"
+    root.mkdir()
+    (root / "CURRENT").write_text("a" * 32)
+    environment = {**os.environ, "PYTHONSAFEPATH": "1", "RAG_API_KEY": "test-direct-launch-key"}
+    for key in ("PYTHONPATH", "RAG_CONFIG", "RAG_STORAGE__ROOT"):
+        environment.pop(key, None)
+    code = '''
+import os, runpy, sys
+from types import SimpleNamespace
+entry = sys.argv.pop(1)
+sys.modules['uvicorn'] = SimpleNamespace(run=lambda *a, **kw: print('TEST_SERVER_CWD=' + os.getcwd()))
+runpy.run_path(entry, run_name='__main__')
+'''
+    result = subprocess.run([sys.executable, "-P", "-c", code, str(repo / "serve" / "run.py"),
+                             "--index-root", str(root)], cwd=tmp_path, env=environment,
+                            text=True, capture_output=True, timeout=20)
+    assert result.returncode == 0, result.stderr
+    assert "TEST_SERVER_CWD=" + str(repo) in result.stdout
+    assert "Index: " + str(root) in result.stdout

@@ -13,6 +13,7 @@
 | `serve/api.py` | 覆盖现有文件；保留原 `/search` 契约，新增根路径 HTML 页面 |
 | `serve/search.html` | 新增页面，包含全部样式和 JavaScript，无外部 CDN |
 | `serve/run.py` | 新增本地启动入口 |
+| `serve/__init__.py` | 保留此空文件，使 serve 明确作为本地 Python 包 |
 
 ## Windows 双击启动（推荐）
 
@@ -23,6 +24,11 @@
 `data/index`、且没有显式环境变量指定索引时，启动器优先寻找仓库同级的
 `video_rag_data/index/CURRENT`；自定义配置、环境变量和显式 `--index-root` 保留优先级。
 索引不存在时会报错，不自动建库或创建空索引。
+
+启动器会先检查 `config.yaml`、`core/config.py` 和 `serve/` 下必要文件是否齐全，再用
+绝对路径执行 `serve/run.py`。该入口显式加入仓库根目录到模块搜索路径，兼容 Python
+启用安全路径、未自动包含当前目录的情况。若提示缺文件，完整解压更新包并保留目录
+结构；不要把 `run.py`、`api.py`、`search.html` 平铺到仓库根目录。
 
 服务和模型加载完成后，默认浏览器自动打开本机检索页。将终端显示的 Access key
 填入页面即可查询；访问密钥的使用方式保持不变。可以将终端最小化，保持它运行。

@@ -3,8 +3,15 @@ import argparse
 import os
 from pathlib import Path
 import secrets
+import sys
 import threading
 import webbrowser
+
+if __package__ in {None, ""}:
+    # Support an absolute script launch even when Python omits cwd from sys.path.
+    repository = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(repository))
+    os.chdir(repository)
 
 from core.config import load_config
 

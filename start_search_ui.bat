@@ -13,9 +13,21 @@ if not exist "%APP_PYTHON%" (
     exit /b 1
 )
 
+for %%F in (config.yaml core\config.py serve\__init__.py serve\run.py serve\api.py serve\search.html) do (
+    if not exist "%~dp0%%F" (
+        echo [ERROR] Required project file is missing: %%F
+        echo Repository: "%~dp0"
+        echo Extract the complete update package here and preserve its folders.
+        echo Put run.py and api.py inside the serve folder, not beside this BAT.
+        pause
+        exit /b 1
+    )
+)
+
+echo Repository: "%~dp0"
 echo Starting the local video search page. Model loading may take a moment.
 echo The browser will open when the service is ready.
-"%APP_PYTHON%" -m serve.run --open-browser %*
+"%APP_PYTHON%" "%~dp0serve\run.py" --open-browser %*
 set "APP_EXIT_CODE=%ERRORLEVEL%"
 if not "%APP_EXIT_CODE%"=="0" (
     echo.
