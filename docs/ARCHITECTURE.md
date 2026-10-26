@@ -109,8 +109,9 @@ Whisper 再读取本地音轨，减少对 OneDrive 原视频的反复读取。
 | [ingest/index.py](../ingest/index.py) | 编码块原文、计算 BM25、写入独立 Qdrant 快照，成功后发布 | 可检索的索引快照 |
 | [ingest/convert_legacy.py](../ingest/convert_legacy.py) | 将旧时间戳 Markdown 转为标准转录；推定结束时间标为 `estimated` | 标准 JSONL 转录 |
 
-增强入口会先复用已有 Ollama；本机连接被拒绝时，自动以禁用云功能的环境后台启动已有
-Ollama，服务与模型检查通过后才处理原文。不自动安装或下载模型。
+增强入口会先复用已有 Ollama；本机连接被拒绝，或 TCP 超时但本地端口确认可绑定时，
+自动以禁用云功能的环境后台启动已有 Ollama。端口占用或无法绑定则明确报错。
+服务与模型检查通过后才处理原文，不自动安装或下载模型。
 实现位于 `core/ollama.py`，详情见 [Ollama 自动启动](OLLAMA_STARTUP.md)。
 
 ### 5.1 为什么有两次 embedding

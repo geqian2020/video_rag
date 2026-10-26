@@ -1,8 +1,10 @@
 """Reuse Ollama or start a detached local server; never install or pull models."""
 import errno
+import ipaddress
 import os
 from pathlib import Path
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -49,16 +51,49 @@ def _launch(executable, address, logfile):
         return subprocess.Popen([executable, "serve"], stdout=log, stderr=log, **options)
 
 
+def _require_free_local_port(host, port):
+    """Check binding only; do not listen, connect, kill or restart another process."""
+    addresses = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+    checked = set()
+    for family, kind, protocol, _, address in addresses:
+        key = (family, address)
+        if key in checked:
+            continue
+        checked.add(key)
+        if not ipaddress.ip_address(address[0]).is_loopback:
+            raise RuntimeError(f"Refusing to bind non-loopback address resolved from {host}")
+        try:
+            with socket.socket(family, kind, protocol) as probe:
+                # Windows normally allows some shared binds unless this is set.
+                if sys.platform == "win32":
+                    probe.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+                probe.bind(address)
+        except OSError as error:
+            raise RuntimeError(
+                f"Ollama connection timed out at {host}:{port}, but its local port is occupied "
+                "or cannot be bound. No new server was started. Check the configured URL, "
+                f"existing listener and local network controls. Bind error: {error}") from error
+    if not checked:
+        raise RuntimeError(f"No local address resolved for Ollama host: {host}")
+
+
 def ensure_ollama(client, cfg, logfile, *, auto_start=True, startup_timeout=30, report=print):
-    """Only an explicitly refused loopback connection triggers server startup.
+    """Start on local refusal, or connection timeout with a verified free port.
 
     Existing servers are not restarted; their environment remains their owner's
     responsibility. The caller still checks that the selected model is local.
     A server started here remains alive for later pipeline runs.
     """
     url = cfg.enrichment.url
+    report(f"[OLLAMA] Checking server: url={url}, model={cfg.enrichment.model}")
+    connection_timed_out = False
     try:
         version = _probe(client, url)
+    except httpx.ConnectTimeout as error:
+        connection_timed_out = True
+        report(f"[OLLAMA] Initial TCP connection timed out: url={url}, probe timeout=2s")
+        if not auto_start:
+            raise RuntimeError(f"Ollama connection timed out at {url}; automatic startup is disabled") from error
     except httpx.ConnectError as error:
         if not _refused(error):
             raise RuntimeError(f"Cannot connect to Ollama; not a refused connection: {url}") from error
@@ -74,6 +109,10 @@ def ensure_ollama(client, cfg, logfile, *, auto_start=True, startup_timeout=30, 
                            f"start the configured service separately: {url}")
     if parsed.path not in {"", "/"} or parsed.username or parsed.password or parsed.query or parsed.fragment:
         raise ValueError("Ollama URL must be a host root without credentials")
+    if connection_timed_out:
+        report(f"[OLLAMA] Checking local port before startup: {parsed.hostname}:{parsed.port or 80}")
+        _require_free_local_port(parsed.hostname, parsed.port or 80)
+        report("[OLLAMA] Local port is free; attempting automatic startup")
     executable = shutil.which("ollama")
     if not executable:
         raise FileNotFoundError("Ollama executable not found in PATH; use the existing installation "

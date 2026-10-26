@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import os
+import socket
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,7 +14,7 @@ import httpx
 
 from core.config import Settings
 from core.io import write_rows
-from core.ollama import _launch, ensure_ollama
+from core.ollama import _launch, _require_free_local_port, ensure_ollama
 from ingest.enrich import main as enrich_main
 
 
@@ -214,6 +215,91 @@ class OllamaStartup(unittest.TestCase):
                 enrich_main()
         self.assertEqual(output.read_text(encoding="utf-8"), "previous output")
         self.assertEqual(calls, ["/api/version"])
+
+    def test_connect_timeout_free_local_port_triggers_startup(self):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            if len(calls) == 1:
+                raise httpx.ConnectTimeout("timed out", request=request)
+            return httpx.Response(200, json={"version": "test"})
+        with patch("core.ollama._require_free_local_port") as free, \
+                patch("core.ollama.shutil.which", return_value="ollama"), \
+                patch("core.ollama._launch") as launch:
+            self.run_ensure(self.client(handler))
+        free.assert_called_once_with("127.0.0.1", 11434)
+        launch.assert_called_once()
+        self.assertTrue(any("Initial TCP connection timed out" in m for m in self.messages))
+        self.assertIn("Ready", self.messages[-1])
+
+    def test_connect_timeout_occupied_port_does_not_start(self):
+        def handler(request):
+            raise httpx.ConnectTimeout("timed out", request=request)
+        with patch("core.ollama._require_free_local_port", side_effect=RuntimeError("port occupied")), \
+                patch("core.ollama._launch") as launch:
+            with self.assertRaisesRegex(RuntimeError, "occupied"):
+                self.run_ensure(self.client(handler))
+        launch.assert_not_called()
+
+    def test_connect_timeout_disabled_does_not_check_port_or_start(self):
+        def handler(request):
+            raise httpx.ConnectTimeout("timed out", request=request)
+        with patch("core.ollama._require_free_local_port") as free, \
+                patch("core.ollama._launch") as launch:
+            with self.assertRaisesRegex(RuntimeError, "disabled"):
+                self.run_ensure(self.client(handler), auto_start=False)
+        free.assert_not_called()
+        launch.assert_not_called()
+
+    def test_connect_timeout_remote_does_not_bind_or_start(self):
+        self.cfg.enrichment.url = "http://approved.internal:11434"
+        def handler(request):
+            raise httpx.ConnectTimeout("timed out", request=request)
+        with patch("core.ollama._require_free_local_port") as free, \
+                patch("core.ollama._launch") as launch:
+            with self.assertRaisesRegex(RuntimeError, "loopback"):
+                self.run_ensure(self.client(handler))
+        free.assert_not_called()
+        launch.assert_not_called()
+
+    def test_bind_probe_does_not_listen_or_connect(self):
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 11434))]
+        with patch("core.ollama.socket.getaddrinfo", return_value=addresses), \
+                patch("core.ollama.socket.socket") as constructor, \
+                patch("core.ollama.sys.platform", "linux"):
+            _require_free_local_port("127.0.0.1", 11434)
+        probe = constructor.return_value.__enter__.return_value
+        probe.bind.assert_called_once_with(("127.0.0.1", 11434))
+        probe.listen.assert_not_called()
+        probe.connect.assert_not_called()
+
+    def test_bind_probe_occupied_or_denied_reports_reason(self):
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 11434))]
+        for number in (errno.EADDRINUSE, errno.EACCES):
+            with patch("core.ollama.socket.getaddrinfo", return_value=addresses), \
+                    patch("core.ollama.socket.socket") as constructor, \
+                    patch("core.ollama.sys.platform", "linux"):
+                constructor.return_value.__enter__.return_value.bind.side_effect = OSError(number, "injected")
+                with self.assertRaisesRegex(RuntimeError, "No new server was started"):
+                    _require_free_local_port("127.0.0.1", 11434)
+
+    def test_bind_probe_windows_uses_exclusive_address(self):
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("127.0.0.1", 11434))]
+        with patch("core.ollama.socket.getaddrinfo", return_value=addresses), \
+                patch("core.ollama.socket.socket") as constructor, \
+                patch("core.ollama.sys.platform", "win32"), \
+                patch("core.ollama.socket.SO_EXCLUSIVEADDRUSE", 99, create=True):
+            _require_free_local_port("127.0.0.1", 11434)
+        probe = constructor.return_value.__enter__.return_value
+        probe.setsockopt.assert_called_once_with(socket.SOL_SOCKET, 99, 1)
+
+    def test_bind_probe_rejects_non_loopback_resolution(self):
+        addresses = [(socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.1", 11434))]
+        with patch("core.ollama.socket.getaddrinfo", return_value=addresses), \
+                patch("core.ollama.socket.socket") as constructor:
+            with self.assertRaisesRegex(RuntimeError, "non-loopback"):
+                _require_free_local_port("localhost", 11434)
+        constructor.assert_not_called()
 
 
 if __name__ == "__main__":
