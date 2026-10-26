@@ -9,7 +9,7 @@
 
 | 文件 | 操作 |
 |---|---|
-| `start_search_ui.bat` | 新增到仓库根目录，日常双击启动 |
+| `start_search_ui.bat` | 放在代码仓库根目录或旁边的 `video_rag_data`，日常双击启动 |
 | `serve/api.py` | 覆盖现有文件；保留原 `/search` 契约，新增根路径 HTML 页面 |
 | `serve/search.html` | 新增页面，包含全部样式和 JavaScript，无外部 CDN |
 | `serve/run.py` | 新增本地启动入口 |
@@ -17,12 +17,20 @@
 
 ## Windows 双击启动（推荐）
 
-把 `start_search_ui.bat` 放在代码仓库根目录，与 `.venv`、`config.yaml`、`serve` 目录同级。
-日常直接双击此文件即可，无需先打开 Git Bash、激活虚拟环境或输入 Python 命令。
+`start_search_ui.bat` 支持两种位置：代码仓库根目录，或与代码目录同级的
+`video_rag_data`。日常直接双击此文件，无需先打开 Git Bash、激活虚拟环境或输入命令。
 
-它直接使用 `.venv/Scripts/python.exe`，自动切换到正确工作目录。现有配置使用默认
-`data/index`、且没有显式环境变量指定索引时，启动器优先寻找仓库同级的
-`video_rag_data/index/CURRENT`；自定义配置、环境变量和显式 `--index-root` 保留优先级。
+放在 `video_rag_data` 时，启动器使用 `../video_rag-experiment-post-rerank-context` 的代码
+与 `.venv/Scripts/python.exe`，索引明确指向 `.bat` 所在目录的 `index`。代码目录名称与
+此部署约定一致；自定义名称时需要调整批处理中的 `APP_REPO`。放在代码根目录时，
+使用当前目录代码及旁边的 `../video_rag_data/index`。
+
+无论 `.bat` 放在哪里，`serve/run.py`、`serve/api.py`、`serve/search.html` 和
+`serve/__init__.py` 都应位于代码仓库的 `serve/` 下，不应复制到数据目录。
+
+批处理直接使用代码目录的 `.venv/Scripts/python.exe`，自动切换到代码目录，并明确传入
+此布局下的索引位置。直接使用 `python -m serve.run` 时，仍沿用 Python 入口的配置、
+环境变量和默认部署路径查找逻辑。
 索引不存在时会报错，不自动建库或创建空索引。
 
 启动器会先检查 `config.yaml`、`core/config.py` 和 `serve/` 下必要文件是否齐全，再用
@@ -32,7 +40,7 @@
 
 服务和模型加载完成后，默认浏览器自动打开本机检索页。将终端显示的 Access key
 填入页面即可查询；访问密钥的使用方式保持不变。可以将终端最小化，保持它运行。
-若希望从桌面启动，请为这个 `.bat` 创建快捷方式，原文件继续留在仓库根目录。
+若希望从桌面启动，请创建快捷方式，原 `.bat` 继续留在上述支持的位置。
 
 此入口不安装软件、不下载模型、不调用 Qwen/Ollama。模型仍会在每次新的服务进程启动
 时从硬盘加载一次，服务运行期间供多个查询复用。启动失败时窗口暂停显示错误。

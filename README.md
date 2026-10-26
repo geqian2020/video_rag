@@ -10,7 +10,7 @@
 
 浏览器提问、证据展示和一条命令启动见 [HTML 检索页](docs/SEARCH_UI.md)。
 
-Windows 日常可直接双击仓库根目录的 `start_search_ui.bat`：自动使用已有 `.venv`、
+Windows 日常可直接双击代码目录或旁边 `video_rag_data` 中的 `start_search_ui.bat`：自动使用已有 `.venv`、
 查找默认部署索引，待服务就绪后打开网页，无需手动激活环境或输入启动命令。
 
 公司电脑无法安装 Ollama 时，当前随附配置使用 `enrichment.mode: extractive`：直接保留
