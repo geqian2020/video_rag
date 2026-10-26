@@ -6,6 +6,8 @@
 
 当前方案、已完成项和待验证项见 [进度记录](docs/STATUS.md)。
 
+目录职责、模块依赖、数据流与断点恢复边界见 [软件架构与代码导读](docs/ARCHITECTURE.md)。
+
 ## 项目目录
 
 完整新增文件目录见 [PROJECT_TREE.md](docs/PROJECT_TREE.md)。核心入口：
