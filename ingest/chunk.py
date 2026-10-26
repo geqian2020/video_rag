@@ -7,6 +7,7 @@ import time
 import uuid
 from collections import defaultdict
 from contextlib import contextmanager
+from pathlib import Path
 
 import numpy as np
 
@@ -14,6 +15,7 @@ from core.config import load_config
 from core.io import read_rows, write_rows
 from core.models import Embedder
 from core.schema import Chunk, Segment
+from ingest.embedding_cache import EmbeddingCache, model_signature
 
 
 def progress(message):
@@ -53,7 +55,7 @@ def sentence_units(segment):
     return [segment.model_copy(update={"text": p}) for p in parts if p.strip()]
 
 
-def build_chunks(rows, embedder, cfg):
+def build_chunks(rows, embedder, cfg, embedding_cache=None):
     started = time.monotonic()
     groups = defaultdict(list)
     input_count = 0
@@ -81,7 +83,11 @@ def build_chunks(rows, embedder, cfg):
             if checked % 1000 == 0:
                 progress(f"{label}: validated={checked}/{len(units)}")
         with stage(f"{label}: embedding {len(units)} sentences"):
-            vectors = embedder.encode([s.text for s in units])
+            texts = [s.text for s in units]
+            if embedding_cache is None:
+                vectors = embedder.encode(texts)
+            else:
+                vectors = embedding_cache.encode(texts, embedder, cfg.models.batch_size)
         progress(f"{label}: assembling chunks")
         current = []
         indices = []
@@ -136,6 +142,10 @@ def main():
     p.add_argument("--input", required=True)
     p.add_argument("--output", default="data/chunks.jsonl")
     p.add_argument("--config", default=None)
+    p.add_argument("--embedding-cache", default=None,
+                   help="Persistent SQLite vector checkpoints; default: beside output")
+    p.add_argument("--no-embedding-cache", action="store_true",
+                   help="Explicitly disable embedding checkpoints")
     a = p.parse_args()
     cfg = load_config(a.config)
     with stage(f"Read input {a.input}"):
@@ -143,8 +153,17 @@ def main():
     progress(f"Loaded input segments={len(source_rows)}")
     with stage(f"Load embedding model={cfg.models.embedding}, device={cfg.models.device}"):
         embedder = Embedder(cfg)
-    embedder.show_progress = True
-    rows = build_chunks(source_rows, embedder, cfg)
+    if a.no_embedding_cache:
+        embedder.show_progress = True
+        rows = build_chunks(source_rows, embedder, cfg)
+    else:
+        # Our saved-batch counters replace an inner progress bar per tiny batch.
+        embedder.show_progress = False
+        cache_path = a.embedding_cache or Path(a.output).with_name("chunk_embeddings.sqlite3")
+        with stage("Resolve embedding cache model identity"):
+            signature = model_signature(cfg, embedder)
+        with EmbeddingCache(cache_path, signature, progress) as cache:
+            rows = build_chunks(source_rows, embedder, cfg, embedding_cache=cache)
     with stage(f"Write output {a.output}"):
         write_rows(a.output, rows)
     progress(f"Complete: chunks={len(rows)}, output={a.output}")
