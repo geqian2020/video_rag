@@ -151,7 +151,7 @@ Ollama，状态显式为 `extractive_fallback`。Dense、原文 BM25、重排和
 | 分块中的句子编码 | `chunk_embeddings.sqlite3` | 校验模型身份、向量形状和哈希后复用已编码句子 |
 | 分块组装 | 全部成功后发布块 JSONL | 中断后重新组装，但句向量可以复用 |
 | Ollama 增强 | 当前全部完成后才写正式输出 | 尚无逐块持久化恢复，不能认为已打印处理数量就已保存 |
-| 索引构建 | 独立 generation 快照；成功后切换 `CURRENT` | 当前为完整快照重建，失败不会发布，也不会自动续建失败快照 |
+| 索引构建 | 块向量缓存、独立 generation、逐批读回校验记录 | 相同输入/配置续建未发布快照，校验已完成批次后跳过；全部通过后才切换 `CURRENT` |
 
 句向量缓存每个推理批次提交一次，当前默认批量为 8。已提交批次可以恢复；中断时尚未
 保存的最后一批可能重算。重复句子可跨视频复用，但最终来源和时间戳保持分离。
@@ -160,6 +160,9 @@ Ollama，状态显式为 `extractive_fallback`。Dense、原文 BM25、重排和
 
 旧版没有落盘的向量不能从旧进程追补。完整恢复规则见
 [embedding_checkpoints.md](embedding_checkpoints.md)。
+
+完整块建库另有 `index_embeddings.sqlite3` 和批次检查点，详见
+[建库进度与恢复](INDEX_CHECKPOINTS.md)。它和分块时的句向量缓存服务于不同编码对象。
 
 ### 5.4 chunk 如何决定大小，是否存在重叠
 

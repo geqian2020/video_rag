@@ -14,6 +14,8 @@ Ollama 服务；详见 [无 Ollama 部署](docs/NO_OLLAMA.md)。需要生成问�
 
 ## 项目目录
 
+建库的完整块向量缓存、逐批进度与中断恢复见 [建库进度与恢复](docs/INDEX_CHECKPOINTS.md)。
+
 完整新增文件目录见 [PROJECT_TREE.md](docs/PROJECT_TREE.md)。核心入口：
 
 | 路径 | 用途 |
@@ -22,7 +24,7 @@ Ollama 服务；详见 [无 Ollama 部署](docs/NO_OLLAMA.md)。需要生成问�
 | core/ | 校验、模型加载、BM25 稀疏向量、存储与原子发布 |
 | ingest/chunk.py | 句子相似度 + 时间窗分块 |
 | ingest/enrich.py | 完整增强 prompt、证据校验、Ollama 调用 |
-| ingest/index.py | Qdrant dense/sparse 快照建库 |
+| ingest/index.py | Qdrant dense/sparse 快照建库，批次进度和未发布快照断点恢复 |
 | ingest/convert_legacy.py | 兼容旧时间戳 Markdown |
 | retrieve/search.py / rerank.py | 两路召回、RRF、cross-encoder |
 | serve/api.py | /health、鉴权 /search |
