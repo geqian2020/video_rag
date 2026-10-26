@@ -2,11 +2,13 @@
 import argparse
 import json
 import re
+from pathlib import Path
 
 import httpx
 
 from core.config import load_config
 from core.io import read_rows, write_rows
+from core.ollama import ensure_ollama
 from core.schema import Chunk, Enhancement, validate_enhancement
 
 PROMPT = """你是转录摘录与检索问题编辑员。只基于用户提供的原文，禁止添加外部知识。
@@ -26,6 +28,9 @@ def check_local_model(client, cfg):
     if "cloud" in name.lower():
         raise ValueError("禁止 cloud 模型")
     r = client.post(cfg.enrichment.url + "/api/show", json={"model": name})
+    if r.status_code == 404:
+        raise RuntimeError(f"Ollama model is not available: {name}; check existing models with "
+                           "'ollama list'. No model download was attempted.")
     r.raise_for_status()
     info = r.json()
     if info.get("remote_model") or info.get("remote_host"):
@@ -65,11 +70,17 @@ def main():
     p.add_argument("--input", default="data/chunks.jsonl")
     p.add_argument("--output", default="data/enriched.jsonl")
     p.add_argument("--config", default=None)
+    p.add_argument("--no-auto-start-ollama", action="store_true",
+                   help="Fail if Ollama is unavailable instead of starting a local server")
     a = p.parse_args()
     cfg = load_config(a.config)
     chunks = [Chunk.model_validate(r) for r in read_rows(a.input)]
     with httpx.Client(timeout=cfg.enrichment.timeout, trust_env=False, follow_redirects=False) as client:
+        ensure_ollama(client, cfg, Path(a.output).parent / "ollama-server.log",
+                      auto_start=not a.no_auto_start_ollama,
+                      report=lambda message: print(message, flush=True))
         check_local_model(client, cfg)
+        print(f"[OLLAMA] Local model available: {cfg.enrichment.model}", flush=True)
         result = []
         for i, c in enumerate(chunks, 1):
             result.append(enrich_one(c, client, cfg))
@@ -80,3 +91,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

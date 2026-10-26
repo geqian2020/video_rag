@@ -109,6 +109,10 @@ Whisper 再读取本地音轨，减少对 OneDrive 原视频的反复读取。
 | [ingest/index.py](../ingest/index.py) | 编码块原文、计算 BM25、写入独立 Qdrant 快照，成功后发布 | 可检索的索引快照 |
 | [ingest/convert_legacy.py](../ingest/convert_legacy.py) | 将旧时间戳 Markdown 转为标准转录；推定结束时间标为 `estimated` | 标准 JSONL 转录 |
 
+增强入口会先复用已有 Ollama；本机连接被拒绝时，自动以禁用云功能的环境后台启动已有
+Ollama，服务与模型检查通过后才处理原文。不自动安装或下载模型。
+实现位于 `core/ollama.py`，详情见 [Ollama 自动启动](OLLAMA_STARTUP.md)。
+
 ### 5.1 为什么有两次 embedding
 
 | 阶段 | 编码对象 | 用途 |
@@ -257,6 +261,7 @@ Ollama 分别承担编码、相关性排序、语音识别、离线增强，不�
 | [schema.py](../core/schema.py) | 定义 Segment、Chunk、Enhancement，校验时间与证据来源 |
 | [io.py](../core/io.py) | JSON/JSONL 读写，通过临时文件加替换实现原子发布 |
 | [models.py](../core/models.py) | 嵌入模型加载、编码、token 计数和模型配置指纹 |
+| [ollama.py](../core/ollama.py) | 检查、复用或后台启动本地 Ollama 服务 |
 | [sparse.py](../core/sparse.py) | 分词、BM25 统计与稀疏向量 |
 | [store.py](../core/store.py) | 打开本地 embedded 或内网服务端 Qdrant |
 | [media.py](../core/media.py) | 本地媒体检查、FFprobe、FFmpeg、时间窗口工具 |
