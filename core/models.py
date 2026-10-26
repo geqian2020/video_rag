@@ -6,6 +6,8 @@ class Embedder:
     def __init__(self, cfg):
         from sentence_transformers import SentenceTransformer
         self.cfg = cfg
+        # CLI ingestion enables this; retrieval stays quiet by default.
+        self.show_progress = False
         self.model = SentenceTransformer(
             cfg.models.embedding, device=cfg.models.device,
             revision=cfg.models.embedding_revision,
@@ -28,10 +30,11 @@ class Embedder:
             raise ValueError("文本超过 embedding token 上限，拒绝静默截断")
         return np.asarray(self.model.encode(
             texts, normalize_embeddings=True, batch_size=self.cfg.models.batch_size,
-            show_progress_bar=False, **kwargs), dtype=np.float32)
+            show_progress_bar=self.show_progress, **kwargs), dtype=np.float32)
 
 
 def fingerprint(cfg):
     # 同维度的不同模型不能混用；本地路径内容更改也必须重建。
     return {k: getattr(cfg.models, k) for k in
             ("embedding", "embedding_revision", "max_tokens", "query_prompt_name")}
+
