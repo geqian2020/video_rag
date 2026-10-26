@@ -208,6 +208,10 @@ Ollama，状态显式为 `extractive_fallback`。Dense、原文 BM25、重排和
 
 ## 6. 在线检索与 API
 
+浏览器入口是 `serve/search.html`，由 `serve/api.py` 的 `/` 同源托管，通过已有 `/search`
+接口查询。`python -m serve.run --index-root ...` 可指定现有索引并启动本机服务，
+详见 [HTML 检索页](SEARCH_UI.md)。无需重新建库，不调用生成模型。
+
 ```mermaid
 flowchart TD
     Q["工作台提交问题"] --> API["serve/api.py"]

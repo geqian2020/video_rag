@@ -8,6 +8,8 @@
 
 目录职责、模块依赖、数据流与断点恢复边界见 [软件架构与代码导读](docs/ARCHITECTURE.md)。
 
+浏览器提问、证据展示和一条命令启动见 [HTML 检索页](docs/SEARCH_UI.md)。
+
 公司电脑无法安装 Ollama 时，当前随附配置使用 `enrichment.mode: extractive`：直接保留
 原文、摘录摘要、留空生成问题，继续 Dense + 原文 BM25 + 重排 + API。无需生成模型或
 Ollama 服务；详见 [无 Ollama 部署](docs/NO_OLLAMA.md)。需要生成问题时显式选择 `mode: ollama`。
