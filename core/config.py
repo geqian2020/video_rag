@@ -38,6 +38,8 @@ class Chunking(Strict):
 
 
 class Enrichment(Strict):
+    # extractive bypasses Ollama; existing configs retain ollama unless selected.
+    mode: str = Field("ollama", pattern="^(ollama|extractive)$")
     url: str = "http://127.0.0.1:11434"
     model: str = "qwen3:4b"
     timeout: float = Field(180, gt=0)
@@ -137,3 +139,4 @@ def load_config(path: str | None = None) -> Settings:
     if cfg.storage.qdrant_url:
         local_endpoint(cfg.storage.qdrant_url, cfg)
     return cfg
+

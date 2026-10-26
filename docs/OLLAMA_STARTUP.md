@@ -1,5 +1,8 @@
 # Ollama 自动启动
 
+本说明仅适用于 `enrichment.mode: ollama`。公司电脑不能安装 Ollama 时，使用
+[原文模式](NO_OLLAMA.md)，无需启动任何 Ollama 服务。
+
 `python -m ingest.enrich` 现在会先检查配置地址的 Ollama 服务。现有 V7 脚本调用这个
 入口，因此无须修改 `.sh`，也无须每次手动执行 `ollama serve`。
 

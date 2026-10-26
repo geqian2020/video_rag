@@ -15,6 +15,7 @@ chunking:
   max_seconds: 90
   gap_seconds: 10
 enrichment:
+  mode: extractive  # 当前公司部署无需 Ollama；启用生成问题时显式改为 ollama
   url: http://127.0.0.1:11434
   model: qwen3:4b
   timeout: 180
@@ -54,3 +55,4 @@ asr:
   context_margin: 30
   prompt_tokens: 180
   max_terms: 30
+

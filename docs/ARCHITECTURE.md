@@ -28,7 +28,7 @@ flowchart TD
     T --> J["带时间戳的转录 JSONL"]
     J --> C["ingest.chunk：语义分块"]
     C <--> K["句向量检查点 SQLite"]
-    C --> E["ingest.enrich：摘录摘要、生成检索问题"]
+    C --> E["ingest.enrich：摘录摘要、可选生成检索问题"]
     E --> I["ingest.index：构建索引快照"]
     I --> D["Qdrant：Dense 与 BM25"]
     D --> R["retrieve：召回、融合、重排"]
@@ -105,11 +105,15 @@ Whisper 再读取本地音轨，减少对 OneDrive 原视频的反复读取。
 |---|---|---|
 | [ingest/chunk.py](../ingest/chunk.py) | 转录拆句，计算句子相似度，结合时间、间隙与 token 限制组成块 | 原文、块 ID、时间范围、来源片段 |
 | [ingest/embedding_cache.py](../ingest/embedding_cache.py) | 按模型身份和精确句子内容保存向量，逐批事务提交 | 重启后可复用的句向量 |
-| [ingest/enrich.py](../ingest/enrich.py) | 调用本地 Ollama，生成逐字摘录摘要、检索问题及原文证据，并校验 | 带增强状态的块 |
+| [ingest/enrich.py](../ingest/enrich.py) | 原文模式直接摘录并留空问题；可选 Ollama 模式生成问题和证据并校验 | 带增强状态的块 |
 | [ingest/index.py](../ingest/index.py) | 编码块原文、计算 BM25、写入独立 Qdrant 快照，成功后发布 | 可检索的索引快照 |
 | [ingest/convert_legacy.py](../ingest/convert_legacy.py) | 将旧时间戳 Markdown 转为标准转录；推定结束时间标为 `estimated` | 标准 JSONL 转录 |
 
-增强入口会先复用已有 Ollama；本机连接被拒绝，或 TCP 超时但本地端口确认可绑定时，
+当前公司部署默认 `enrichment.mode: extractive`，直接输出摘录摘要和空问题，不调用
+Ollama，状态显式为 `extractive_fallback`。Dense、原文 BM25、重排和 API 可以继续使用。
+完整操作见 [无 Ollama 部署](NO_OLLAMA.md)。
+
+选择 `mode: ollama` 时，增强入口会先复用已有 Ollama；本机连接被拒绝，或 TCP 超时但本地端口确认可绑定时，
 自动以禁用云功能的环境后台启动已有 Ollama。端口占用或无法绑定则明确报错。
 服务与模型检查通过后才处理原文，不自动安装或下载模型。
 实现位于 `core/ollama.py`，详情见 [Ollama 自动启动](OLLAMA_STARTUP.md)。

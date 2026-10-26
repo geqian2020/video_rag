@@ -8,6 +8,10 @@
 
 目录职责、模块依赖、数据流与断点恢复边界见 [软件架构与代码导读](docs/ARCHITECTURE.md)。
 
+公司电脑无法安装 Ollama 时，当前随附配置使用 `enrichment.mode: extractive`：直接保留
+原文、摘录摘要、留空生成问题，继续 Dense + 原文 BM25 + 重排 + API。无需生成模型或
+Ollama 服务；详见 [无 Ollama 部署](docs/NO_OLLAMA.md)。需要生成问题时显式选择 `mode: ollama`。
+
 ## 项目目录
 
 完整新增文件目录见 [PROJECT_TREE.md](docs/PROJECT_TREE.md)。核心入口：
@@ -262,3 +266,4 @@ uvicorn serve.api:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
 工作台后端调用 `/search` 即可。模型与包没有预先准备好时，“只 git clone 就完全离线运行”做不到；源码仓库不携带数 GB 权重与公司业务数据。
 
 最新恢复状态见 [STATUS](docs/STATUS.md)，评估规则见 [EVALUATION_PLAN](docs/EVALUATION_PLAN.md)。历史五视频组合结果与明细缺失边界见 [OPTIMIZATION_RUN](test/OPTIMIZATION_RUN.md)。PROJECT_SOURCE.md 是早期快照，当前实现以源码为准。
+
