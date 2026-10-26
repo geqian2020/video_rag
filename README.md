@@ -6,7 +6,20 @@
 
 当前方案、已完成项和待验证项见 [进度记录](docs/STATUS.md)。
 
+目录职责、模块依赖、数据流与断点恢复边界见 [软件架构与代码导读](docs/ARCHITECTURE.md)。
+
+浏览器提问、证据展示和一条命令启动见 [HTML 检索页](docs/SEARCH_UI.md)。
+
+Windows 日常可直接双击代码目录或旁边 `video_rag_data` 中的 `start_search_ui.bat`：自动使用已有 `.venv`、
+查找默认部署索引，待服务就绪后打开网页，无需手动激活环境或输入启动命令。
+
+公司电脑无法安装 Ollama 时，当前随附配置使用 `enrichment.mode: extractive`：直接保留
+原文、摘录摘要、留空生成问题，继续 Dense + 原文 BM25 + 重排 + API。无需生成模型或
+Ollama 服务；详见 [无 Ollama 部署](docs/NO_OLLAMA.md)。需要生成问题时显式选择 `mode: ollama`。
+
 ## 项目目录
+
+建库的完整块向量缓存、逐批进度与中断恢复见 [建库进度与恢复](docs/INDEX_CHECKPOINTS.md)。
 
 完整新增文件目录见 [PROJECT_TREE.md](docs/PROJECT_TREE.md)。核心入口：
 
@@ -16,7 +29,7 @@
 | core/ | 校验、模型加载、BM25 稀疏向量、存储与原子发布 |
 | ingest/chunk.py | 句子相似度 + 时间窗分块 |
 | ingest/enrich.py | 完整增强 prompt、证据校验、Ollama 调用 |
-| ingest/index.py | Qdrant dense/sparse 快照建库 |
+| ingest/index.py | Qdrant dense/sparse 快照建库，批次进度和未发布快照断点恢复 |
 | ingest/convert_legacy.py | 兼容旧时间戳 Markdown |
 | retrieve/search.py / rerank.py | 两路召回、RRF、cross-encoder |
 | serve/api.py | /health、鉴权 /search |
@@ -260,3 +273,4 @@ uvicorn serve.api:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
 工作台后端调用 `/search` 即可。模型与包没有预先准备好时，“只 git clone 就完全离线运行”做不到；源码仓库不携带数 GB 权重与公司业务数据。
 
 最新恢复状态见 [STATUS](docs/STATUS.md)，评估规则见 [EVALUATION_PLAN](docs/EVALUATION_PLAN.md)。历史五视频组合结果与明细缺失边界见 [OPTIMIZATION_RUN](test/OPTIMIZATION_RUN.md)。PROJECT_SOURCE.md 是早期快照，当前实现以源码为准。
+

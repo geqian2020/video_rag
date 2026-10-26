@@ -2,9 +2,11 @@
 import hmac
 import logging
 import os
+from pathlib import Path
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from core.config import load_config
@@ -60,6 +62,16 @@ def create_app(factory=None):
 
     app = FastAPI(title="本地视频知识库检索", version="1.0.0", lifespan=lifespan)
 
+    @app.get("/", include_in_schema=False)
+    def search_page():
+        return FileResponse(Path(__file__).with_name("search.html"), media_type="text/html",
+                            headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+                                     "Referrer-Policy": "no-referrer",
+                                     "Content-Security-Policy": "default-src 'none'; "
+                                     "script-src 'unsafe-inline'; style-src 'unsafe-inline'; "
+                                     "connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; "
+                                     "form-action 'self'"})
+
     def authenticate(request: Request, x_api_key: str = Header(default="")):
         if not hmac.compare_digest(x_api_key.encode(), request.app.state.api_key.encode()):
             raise HTTPException(401, "API key 无效")
@@ -88,3 +100,4 @@ def create_app(factory=None):
 
 
 app = create_app()
+

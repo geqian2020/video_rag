@@ -1,7 +1,8 @@
-"""通过本地 Ollama 做可追溯增强；摘要不参与 embedding，问题只进入 sparse。"""
+"""显式选择原文摘录或本地 Ollama 增强；摘要不参与 embedding，问题只进入 sparse。"""
 import argparse
 import json
 import re
+from pathlib import Path
 
 import httpx
 
@@ -26,11 +27,23 @@ def check_local_model(client, cfg):
     if "cloud" in name.lower():
         raise ValueError("禁止 cloud 模型")
     r = client.post(cfg.enrichment.url + "/api/show", json={"model": name})
+    if r.status_code == 404:
+        raise RuntimeError(f"Ollama model is not available: {name}; check existing models with "
+                           "'ollama list'. No model download was attempted.")
     r.raise_for_status()
     info = r.json()
     if info.get("remote_model") or info.get("remote_host"):
         raise ValueError("Ollama 模型指向远程服务，拒绝传入原文")
     # 服务端还必须设置 OLLAMA_NO_CLOUD=1；本地地址本身并不证明服务离线。
+
+
+def extractive_chunk(chunk):
+    """No inference or network; preserve provenance and explicitly mark fallback."""
+    summary = re.split(r"(?<=[。！？!?])|\n", chunk.text)[0] or chunk.text
+    return Chunk.model_validate({
+        **chunk.model_dump(), "summary": summary, "questions": [],
+        "enrichment_status": "extractive_fallback",
+    }).model_dump()
 
 
 def enrich_one(chunk, client, cfg):
@@ -55,9 +68,7 @@ def enrich_one(chunk, client, cfg):
     if cfg.enrichment.on_failure == "fail":
         raise RuntimeError(f"增强未通过验证: {chunk.chunk_id}；未输出新的增强文件")
     # 显式降级，不把失败伪装成模型增强成功。
-    summary = re.split(r"(?<=[。！？!?])|\n", text)[0] or text
-    return {**chunk.model_dump(), "summary": summary, "questions": [],
-            "enrichment_status": "extractive_fallback"}
+    return extractive_chunk(chunk)
 
 
 def main():
@@ -65,18 +76,37 @@ def main():
     p.add_argument("--input", default="data/chunks.jsonl")
     p.add_argument("--output", default="data/enriched.jsonl")
     p.add_argument("--config", default=None)
+    p.add_argument("--mode", choices=("ollama", "extractive"), default=None,
+                   help="Override enrichment.mode; extractive requires no Ollama or generative model")
+    p.add_argument("--no-auto-start-ollama", action="store_true",
+                   help="Fail if Ollama is unavailable instead of starting a local server")
     a = p.parse_args()
     cfg = load_config(a.config)
     chunks = [Chunk.model_validate(r) for r in read_rows(a.input)]
-    with httpx.Client(timeout=cfg.enrichment.timeout, trust_env=False, follow_redirects=False) as client:
-        check_local_model(client, cfg)
+    mode = a.mode or cfg.enrichment.mode
+    if mode == "extractive":
+        print(f"[ENRICH] mode=extractive, chunks={len(chunks)}; no Ollama, no generated questions", flush=True)
         result = []
         for i, c in enumerate(chunks, 1):
-            result.append(enrich_one(c, client, cfg))
-            print(f"已处理 {i}/{len(chunks)}", flush=True)
+            result.append(extractive_chunk(c))
+            if i % 500 == 0 or i == len(chunks):
+                print(f"[ENRICH] Extracted {i}/{len(chunks)}", flush=True)
+    else:
+        from core.ollama import ensure_ollama
+        with httpx.Client(timeout=cfg.enrichment.timeout, trust_env=False, follow_redirects=False) as client:
+            ensure_ollama(client, cfg, Path(a.output).parent / "ollama-server.log",
+                          auto_start=not a.no_auto_start_ollama,
+                          report=lambda message: print(message, flush=True))
+            check_local_model(client, cfg)
+            print(f"[OLLAMA] Local model available: {cfg.enrichment.model}", flush=True)
+            result = []
+            for i, c in enumerate(chunks, 1):
+                result.append(enrich_one(c, client, cfg))
+                print(f"已处理 {i}/{len(chunks)}", flush=True)
     write_rows(a.output, result)
-    print(f"增强完成: {len(result)} 个块；请抽查问题是否可由原文直接回答")
+    print(f"[ENRICH] Complete: mode={mode}, chunks={len(result)}, output={a.output}", flush=True)
 
 
 if __name__ == "__main__":
     main()
+

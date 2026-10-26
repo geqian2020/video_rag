@@ -38,6 +38,8 @@ class Chunking(Strict):
 
 
 class Enrichment(Strict):
+    # extractive bypasses Ollama; existing configs retain ollama unless selected.
+    mode: str = Field("ollama", pattern="^(ollama|extractive)$")
     url: str = "http://127.0.0.1:11434"
     model: str = "qwen3:4b"
     timeout: float = Field(180, gt=0)
@@ -54,6 +56,8 @@ class Storage(Strict):
 
 
 class Retrieval(Strict):
+    # Experiment: rank original chunks before expanding the selected evidence.
+    expand_after_rerank: bool = False
     context_seconds: float = Field(0, ge=0, le=60, allow_inf_nan=False)
     recall_k: int = Field(30, ge=30, le=200)
     top_k: int = Field(5, ge=1, le=30)
@@ -135,3 +139,4 @@ def load_config(path: str | None = None) -> Settings:
     if cfg.storage.qdrant_url:
         local_endpoint(cfg.storage.qdrant_url, cfg)
     return cfg
+
