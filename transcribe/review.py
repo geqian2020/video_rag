@@ -75,17 +75,33 @@ def digest(source):
     return hashlib.sha256(Path(source).read_bytes()).hexdigest()
 
 
-def export_review(source, output=None, *, target_seconds=30, max_seconds=60, gap_seconds=10):
+def video_rows(rows, video_id=None):
+    ids = list(dict.fromkeys(row['video_id'] for row in rows))
+    if video_id is None:
+        if len(ids) != 1:
+            raise ValueError('输入包含多个视频，请使用 export_reviews 分别导出每个视频的完整稿')
+        video_id = ids[0]
+    selected = [row for row in rows if row['video_id'] == video_id]
+    if not selected:
+        raise ValueError(f'原件中不存在视频：{video_id}')
+    return selected
+
+
+def export_review(source, output=None, *, target_seconds=30, max_seconds=60,
+                  gap_seconds=10, video_id=None):
     source = Path(source)
     output = Path(output) if output is not None else source.with_suffix('.review.md')
     if output.resolve() == source.resolve() or output.exists():
         raise FileExistsError(f'保留已有文件，不覆盖：{output}')
-    rows = source_rows(source)
+    rows = video_rows(source_rows(source), video_id)
     options = dict(target_seconds=target_seconds, max_seconds=max_seconds, gap_seconds=gap_seconds)
     groups = paragraphs(rows, **options)
-    metadata = dict(version=1, source_sha256=digest(source), **options)
+    metadata = dict(version=1, source_sha256=digest(source), video_id=rows[0]['video_id'], **options)
     text = '<!-- video-rag-review ' + json.dumps(metadata, sort_keys=True) + ' -->\n'
-    text += '# 转录校对稿\n\n只修改各段正文；保留文件头、段落编号、时间及视频标识。\n'
+    text += '# 完整转录校对稿\n\n'
+    text += '视频：' + json.dumps(rows[0]['video_id'], ensure_ascii=False) + '\n\n'
+    text += f'本稿包含该视频全部 {len(rows)} 个原始片段，合为 {len(groups)} 段，正文不作摘要或删减。\n\n'
+    text += '只修改各段正文；保留文件头、段落编号、时间及视频标识。\n'
     text += '听不清的地方请标注，不按常识补写。段落仅便于校对，不代表完整话题或检索分块。\n'
     for i, group in enumerate(groups, 1):
         body = joined(group)
@@ -94,6 +110,33 @@ def export_review(source, output=None, *, target_seconds=30, max_seconds=60, gap
         text += '\n' + heading(i, group) + '\n\n' + body + '\n'
     atomic_text(output, text)
     return output
+
+
+def export_reviews(source, output=None, **options):
+    """一个视频一份完整稿；混合 JSONL 自动分成多个 Markdown。"""
+    source = Path(source)
+    ids = list(dict.fromkeys(row['video_id'] for row in source_rows(source)))
+    if len(ids) == 1:
+        destinations = [(ids[0], Path(output) if output else source.with_suffix('.review.md'))]
+    else:
+        directory = Path(output) if output else source.with_suffix('.reviews')
+        if directory.suffix.lower() == '.md' or directory.is_file():
+            raise ValueError('输入包含多个视频，--output 请指定文件夹，而非一个 Markdown 文件')
+        destinations = []
+        for video_id in ids:
+            # 视频 ID 可能含目录、Windows 保留字符；短哈希避免同名冲突。
+            stem = video_id.replace('\\', '/').rsplit('/', 1)[-1]
+            stem = re.sub(r'[^\w.-]+', '_', stem)[:64].strip('. ') or 'video'
+            suffix = hashlib.sha256(video_id.encode('utf-8')).hexdigest()[:12]
+            destinations.append((video_id, directory / f'{stem}-{suffix}.review.md'))
+    outputs = []
+    for video_id, path in destinations:
+        try:
+            export_review(source, path, video_id=video_id, **options)
+        except FileExistsError:
+            pass  # 已有稿件逐个保留，不阻止其他视频导出。
+        outputs.append(path)
+    return outputs
 
 
 def import_review(source, review, output):
@@ -109,7 +152,12 @@ def import_review(source, review, output):
     metadata = json.loads(first[len('<!-- video-rag-review '):-len(' -->')])
     if metadata.pop('version') != 1 or metadata.pop('source_sha256') != digest(source):
         raise ValueError('原始转录已改变或文件不匹配，请重新导出并迁移校对内容')
-    groups = paragraphs(source_rows(source), **metadata)
+    rows = source_rows(source)
+    video_id = metadata.pop('video_id', None)
+    # 兼容旧版稿件；新稿只导回当前 Markdown 对应视频。
+    if video_id is not None:
+        rows = video_rows(rows, video_id)
+    groups = paragraphs(rows, **metadata)
     markers = list(re.finditer(r'^## P[^\n]*$', rest, re.M))
     if [m.group() for m in markers] != [heading(i, g) for i, g in enumerate(groups, 1)]:
         raise ValueError('段落编号、顺序、时间或视频标识被修改；请保留全部段落标题')
@@ -136,7 +184,7 @@ def main():
     commands = parser.add_subparsers(dest='command', required=True)
     export = commands.add_parser('export', help='导出单文件，或递归批量导出目录内的 JSONL')
     export.add_argument('--input', required=True)
-    export.add_argument('--output')
+    export.add_argument('--output', help='单视频指定 .md；多视频指定输出文件夹')
     export.add_argument('--target-seconds', type=float, default=30)
     export.add_argument('--max-seconds', type=float, default=60)
     export.add_argument('--gap-seconds', type=float, default=10)
@@ -155,11 +203,9 @@ def main():
         if not sources:
             parser.error('目录中没有 JSONL')
         for source in sources:
-            try:
-                print(export_review(source, args.output, target_seconds=args.target_seconds,
-                                    max_seconds=args.max_seconds, gap_seconds=args.gap_seconds))
-            except FileExistsError as exc:
-                print(exc)
+            for output in export_reviews(source, args.output, target_seconds=args.target_seconds,
+                                         max_seconds=args.max_seconds, gap_seconds=args.gap_seconds):
+                print(f'完整校对稿（已有文件保留）：{output}')
 
 
 if __name__ == '__main__':
