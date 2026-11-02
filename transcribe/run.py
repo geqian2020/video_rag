@@ -183,8 +183,18 @@ def main():
     count = lambda text: len(tokenizer.encode(' ' + text.strip()))
     transcribe_video(video, a.video_id, vocab, cfg, model, count, a.output,
                      audio_source=a.audio_source)
-    log_progress('转录完成；输出 JSONL 与 .audit.json，可继续 ingest.chunk')
+    from transcribe.review import export_review
+    try:
+        review = export_review(a.output)
+        log_progress(f'人工校对稿：{review}')
+    except FileExistsError:
+        log_progress('已有人工校对稿，已保留；如原始转录改变，请另行导出新稿')
+    except (OSError, ValueError) as exc:
+        # An optional reading copy must not invalidate completed, checkpointed ASR.
+        log_progress(f'校对稿导出失败（JSONL 已完成，可单独导出）：{exc}')
+    log_progress('转录完成；输出 JSONL 与 .audit.json；校对后导回新 JSONL 再 ingest.chunk')
 
 
 if __name__ == '__main__':
     main()
+
