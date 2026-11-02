@@ -98,6 +98,8 @@ ollama show qwen3:4b
 
 ### 3. 导入转录数据
 
+**人工校对请使用连续段落稿：** `python -m transcribe.review export --input "D:/video_rag_data/transcripts"` 可批量把已有 JSONL 导出为 `.review.md`，无需重新转录。修改正文后导回新的 JSONL，再做分块与建库；[完整步骤与时间精度说明](docs/TRANSCRIPT_REVIEW.md)。
+
 JSONL 每行一个 segment，或 `.json` 顶层为相同记录的数组。必填字段：
 
 ```json
@@ -260,3 +262,4 @@ uvicorn serve.api:app --host 127.0.0.1 --port 8000 --workers 1 --no-access-log
 工作台后端调用 `/search` 即可。模型与包没有预先准备好时，“只 git clone 就完全离线运行”做不到；源码仓库不携带数 GB 权重与公司业务数据。
 
 最新恢复状态见 [STATUS](docs/STATUS.md)，评估规则见 [EVALUATION_PLAN](docs/EVALUATION_PLAN.md)。历史五视频组合结果与明细缺失边界见 [OPTIMIZATION_RUN](test/OPTIMIZATION_RUN.md)。PROJECT_SOURCE.md 是早期快照，当前实现以源码为准。
+
