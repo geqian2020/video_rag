@@ -44,12 +44,18 @@ def load_local_whisper(cfg):
 def _window_fingerprint(video, video_id, cfg, start, end, prompt, selected):
     # Deliberately do not hash video contents: path identity is enough for this workflow.
     settings = {
+        'backend': cfg.asr.backend, 'compute_type': cfg.asr.compute_type,
+        'beam_size': cfg.asr.beam_size,
         'schema': 1, 'video': str(video), 'video_id': video_id,
         'model': cfg.asr.model, 'device': cfg.asr.device,
         'language': cfg.asr.language, 'window_seconds': cfg.asr.window_seconds,
         'prompt_style': cfg.asr.prompt_style, 'prompt_tokens': cfg.asr.prompt_tokens,
         'start': start, 'end': end, 'prompt': prompt, 'selected_terms': selected,
     }
+    path = Path(video)
+    if path.is_file():
+        stat = path.stat()
+        settings['media_stat'] = [stat.st_size, stat.st_mtime_ns]
     return hashlib.sha256(json.dumps(settings, ensure_ascii=False, sort_keys=True).encode('utf-8')).hexdigest()
 
 
@@ -90,7 +96,16 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output, au
     # A prepared local audio source prevents repeated reads of a OneDrive cloud video.
     # The original video identity is retained for window checkpoint fingerprints.
     media_for_audio = local_media(audio_source) if audio_source is not None else video
-    duration = probe(media_for_audio)['duration']
+    samples = None
+    if cfg.asr.backend == 'faster-whisper':
+        # PyAV ships its decoder libraries; lab needs no system ffmpeg/ffprobe.
+        # A two-hour mono 16kHz float32 waveform uses about 460 MB of RAM.
+        from faster_whisper.audio import decode_audio
+        log_progress('解码音轨（仅当前媒体，不读取其他文档）')
+        samples = decode_audio(str(media_for_audio), sampling_rate=16000)
+        duration = len(samples) / 16000
+    else:
+        duration = probe(media_for_audio)['duration']
     rows, audit = [], []
     checkpoints = Path(str(output) + '.windows')
     with tempfile.TemporaryDirectory(prefix='video-kb-asr-') as temp:
@@ -107,13 +122,18 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output, au
                 continue
 
             audio = Path(temp) / 'window.wav'
-            extract_audio(media_for_audio, audio, start, end)
+            if samples is None:
+                extract_audio(media_for_audio, audio, start, end)
+                model_input = str(audio)
+            else:
+                model_input = samples[round(start * 16000):round(end * 16000)]
             kwargs = {'language': cfg.asr.language, 'task': 'transcribe', 'verbose': False,
                 'fp16': cfg.asr.device.startswith('cuda'), 'condition_on_previous_text': False,
                 'temperature': 0.0, 'initial_prompt': prompt or None, 'carry_initial_prompt': True}
-            result = model.transcribe(str(audio), **kwargs)
+            result = model.transcribe(model_input, **kwargs)
             # Release temporary audio before persisting the completed window.
-            audio.unlink()
+            if audio.exists():
+                audio.unlink()
             window_rows = []
             for seg in result.get('segments', []):
                 text = str(seg['text'])
@@ -173,14 +193,19 @@ def main():
     cfg = load_config(a.config)
     video = local_media(a.video)
     vocab = load_vocabulary(a.vocabulary)
-    model = load_local_whisper(cfg)
-    if not model.is_multilingual and cfg.asr.language != 'en':
-        raise ValueError('中文转录不能使用 .en 英语专用模型')
-    from whisper.tokenizer import get_tokenizer
-    tokenizer = get_tokenizer(model.is_multilingual, num_languages=model.num_languages,
-                              language=cfg.asr.language, task='transcribe')
-    cfg.asr.prompt_tokens = min(cfg.asr.prompt_tokens, model.dims.n_text_ctx//2 - 16)
-    count = lambda text: len(tokenizer.encode(' ' + text.strip()))
+    if cfg.asr.backend == 'faster-whisper':
+        from transcribe.faster import FasterWhisperAdapter
+        model = FasterWhisperAdapter(cfg)
+        count = model.token_count
+    else:
+        model = load_local_whisper(cfg)
+        if not model.is_multilingual and cfg.asr.language != 'en':
+            raise ValueError('中文转录不能使用 .en 英语专用模型')
+        from whisper.tokenizer import get_tokenizer
+        tokenizer = get_tokenizer(model.is_multilingual, num_languages=model.num_languages,
+                                  language=cfg.asr.language, task='transcribe')
+        cfg.asr.prompt_tokens = min(cfg.asr.prompt_tokens, model.dims.n_text_ctx//2 - 16)
+        count = lambda text: len(tokenizer.encode(' ' + text.strip()))
     transcribe_video(video, a.video_id, vocab, cfg, model, count, a.output,
                      audio_source=a.audio_source)
     from transcribe.review import export_review

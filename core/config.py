@@ -88,6 +88,10 @@ class OCR(Strict):
 
 
 class ASR(Strict):
+    backend: str = Field('openai-whisper', pattern='^(openai-whisper|faster-whisper)$')
+    compute_type: str = 'int8'
+    cpu_threads: int = Field(8, ge=1)
+    beam_size: int = Field(5, ge=1, le=10)
     prompt_style: str = Field('terms', pattern='^(terms|labeled)$')
     # 已有 small.pt 路径或已缓存模型名；禁止缺失时自动下载。
     model: str = "small"

@@ -1,0 +1,6 @@
+# lab keeps the existing RAG stack; no OCR or Ollama dependency.
+-r requirements.txt
+faster-whisper==1.2.1
+ctranslate2==4.8.4
+# PyAV 19 removed metadata_errors used by faster-whisper 1.2.1.
+av==16.1.0
