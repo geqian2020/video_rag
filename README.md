@@ -111,6 +111,8 @@ ollama show qwen3:4b
 
 ### 3. 导入转录数据
 
+**人工校对使用一个视频一份完整 Markdown：** `python -m transcribe.review export --input "C:/video_rag_data/transcripts"` 可批量导出该视频从头到尾的全部已转录正文，段落放在同一 `.review.md` 内；混有多个视频的 JSONL 也会按视频分别导出，无需重新转录。修改正文后导回新的 JSONL，再做分块与建库；[完整步骤与时间精度说明](docs/TRANSCRIPT_REVIEW.md)。
+
 JSONL 每行一个 segment，或 `.json` 顶层为相同记录的数组。必填字段：
 
 ```json
