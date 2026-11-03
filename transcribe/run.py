@@ -42,10 +42,10 @@ def load_local_whisper(cfg):
 
 
 def _window_fingerprint(video, video_id, cfg, start, end, prompt, selected):
-    # Deliberately do not hash video contents: path identity is enough for this workflow.
+    # Use path and file stat identity; do not hash the full cloud-backed media.
     settings = {
         'backend': cfg.asr.backend, 'compute_type': cfg.asr.compute_type,
-        'beam_size': cfg.asr.beam_size,
+        'beam_size': cfg.asr.beam_size, 'multilingual': cfg.asr.multilingual,
         'schema': 1, 'video': str(video), 'video_id': video_id,
         'model': cfg.asr.model, 'device': cfg.asr.device,
         'language': cfg.asr.language, 'window_seconds': cfg.asr.window_seconds,
@@ -170,6 +170,8 @@ def transcribe_video(video, video_id, vocab, cfg, model, token_count, output, au
     write_rows(output, rows)
     audit_path = str(output) + '.audit.json'
     write_json(audit_path, {'video_id': video_id, 'model': cfg.asr.model,
+        'backend': cfg.asr.backend, 'language': cfg.asr.language,
+        'multilingual': cfg.asr.multilingual, 'compute_type': cfg.asr.compute_type,
         'mode': 'vocabulary_assisted' if any(w['selected_terms'] for w in audit) else 'no_terms_selected',
         'prompt_style': cfg.asr.prompt_style,
         'review_required_windows': sum(w['review_required'] for w in audit),

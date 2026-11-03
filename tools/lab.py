@@ -17,6 +17,21 @@ ROOT = Path(__file__).resolve().parents[1]
 MEDIA = {'.mp4', '.mkv', '.mov', '.avi', '.webm', '.m4v', '.mp3', '.wav', '.m4a', '.flac', '.ogg', '.wma'}
 ASR_MODELS = {'medium': 'Systran/faster-whisper-medium',
               'large-v3': 'Systran/faster-whisper-large-v3'}
+DEFAULT_ASR_MODEL = 'large-v3'
+
+
+def chosen_asr_model():
+    name = os.environ.get('LAB_ASR_MODEL', DEFAULT_ASR_MODEL)
+    if name not in ASR_MODELS:
+        raise ValueError('LAB_ASR_MODEL must be medium or large-v3.')
+    return name
+
+
+def asr_profile(model_name, cfg):
+    # Different models/language policies keep separate transcripts, checkpoints and reviews.
+    mode = 'mixed' if cfg.asr.multilingual else 'fixed'
+    language = re.sub(r'[^a-zA-Z0-9_-]', '_', cfg.asr.language)
+    return f'{model_name}-{language}-{mode}-v1'
 
 
 def report(message):
@@ -147,14 +162,17 @@ def workspace(source):
     return ROOT / 'data' / 'lab' / key
 
 
-def manifest_for(source, videos, folder):
+def manifest_for(source, videos, folder, profile=None):
     result = []
+    transcripts = folder / 'transcripts'
+    if profile is not None:
+        transcripts = transcripts / profile
     for video in videos:
         key = sha(os.path.normcase(str(video)).encode())[:12]
         stem = re.sub(r'[^\w.-]+', '_', video.stem)[:60].strip('. ') or 'video'
         result.append({'video': str(video),
                        'video_id': video.relative_to(source).as_posix() if source.is_dir() else video.name,
-                       'output': str(folder / 'transcripts' / f'video_{stem}-{key}.jsonl')})
+                       'output': str(transcripts / f'video_{stem}-{key}.jsonl')})
     return result
 
 
@@ -184,6 +202,8 @@ def prepare_models(asr_name):
             def complete_snapshot(path):
                 required = (['model.bin', 'config.json', 'tokenizer.json'] if kind == 'asr'
                             else ['config.json', 'tokenizer.json', 'tokenizer_config.json'])
+                if kind == 'asr' and asr_name == 'large-v3':
+                    required.append('preprocessor_config.json')  # large-v3 uses 128 mel bins.
                 if kind == 'embedding':
                     required.append('modules.json')
                     if (path / 'modules.json').is_file():
@@ -213,6 +233,7 @@ def make_config(folder, paths):
     cfg.asr.device = 'cuda' if torch.cuda.is_available() else 'cpu'
     cfg.asr.compute_type = 'int8_float16' if cfg.asr.device == 'cuda' else 'int8'
     cfg.asr.language = os.environ.get('LAB_LANGUAGE', 'auto')
+    cfg.asr.multilingual = cfg.asr.language == 'auto'
     cfg.models.embedding = paths['embedding']
     cfg.models.reranker = paths['reranker']
     cfg.models.device = 'cpu'  # 4GB GPU stays available for ASR; search models fit in 32GB RAM.
@@ -287,7 +308,8 @@ def asr_worker(manifest, config):
     from transcribe.run import transcribe_video
     from transcribe.review import export_review
     cfg = load_config(str(config))
-    report(f'进入转录步骤: faster-whisper, device={cfg.asr.device}, compute={cfg.asr.compute_type}')
+    report(f'进入转录步骤: faster-whisper, model={cfg.asr.model}, device={cfg.asr.device}, '
+           f'compute={cfg.asr.compute_type}, language={cfg.asr.language}, multilingual={cfg.asr.multilingual}')
     model = None
     entries = json.loads(manifest.read_text(encoding='utf-8'))
     for number, item in enumerate(entries, 1):
@@ -358,7 +380,8 @@ def main():
     folder = workspace(source)
     if args.plan:
         report(f'Input: {source}\nOutput: {folder}\nMedia: {len(discover(source))}\n'
-               'ASR: faster-whisper medium INT8, one window at a time; CPU fallback\n'
+               f'ASR: faster-whisper {chosen_asr_model()} INT8, one window at a time; CPU fallback\n'
+               f'Language: {os.environ.get("LAB_LANGUAGE", "auto")} (auto enables per-window language detection)\n'
                'Embedding: BGE-M3 CPU; reranker: bge-reranker-v2-m3 CPU\n'
                'Hardware budget: 32GB system RAM, 4GB dedicated VRAM; shared GPU RAM is system RAM.')
         return 0
@@ -369,13 +392,16 @@ def main():
     with FileLock(str(folder / 'PIPELINE.lock'), timeout=0):
         config = folder / 'config.json'  # JSON is valid YAML, including Windows paths.
         if not args.search:
-            paths = prepare_models(os.environ.get('LAB_ASR_MODEL', 'medium'))
+            model_name = chosen_asr_model()
+            report(f'Quality profile: {model_name}; GPU capacity does not change the selected model.')
+            paths = prepare_models(model_name)
             cfg = make_config(folder, paths)
             atomic_json(config, cfg.model_dump())
             if args.setup_only:
                 report(f'Environment and models ready. Config: {config}')
                 return 0
-            entries = manifest_for(source, discover(source), folder)
+            profile = asr_profile(model_name, cfg)
+            entries = manifest_for(source, discover(source), folder, profile=profile)
             manifest = folder / 'videos.json'
             atomic_json(manifest, entries)
             asr_args = ['tools.lab', '--worker', 'asr', '--manifest', manifest, '--config', config]
@@ -404,7 +430,7 @@ def main():
                 stamp.write_text(signature, encoding='ascii')
             else:
                 report('Reuse published index (input/config unchanged).')
-            report(f'Complete. Full review Markdown: {folder / "transcripts"}\nIndex: {folder / "index"}')
+            report(f'Complete. Full review Markdown: {folder / "transcripts" / profile}\nIndex: {folder / "index"}')
         if args.search or args.serve:
             if not config.is_file() or not (folder / 'index' / 'CURRENT').is_file():
                 raise FileNotFoundError('No lab index. Run the launcher once without --search.')

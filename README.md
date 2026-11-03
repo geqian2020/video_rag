@@ -1,7 +1,7 @@
 # 本地视频知识库 RAG
 
 **lab 分支一键入口（i9-12900 / 32GB RAM / T400 4GB）**：只修改根目录 `lab_input.txt` 的一行输入路径，
-运行 `bash run_lab.sh` 或双击 `run_lab.cmd`，自动准备环境、转录、完整 Markdown 校对稿、分块及 embedding 建库。
+运行 `bash run_lab.sh` 或双击 `run_lab.cmd`，自动准备环境、large-v3 多语言转录、完整 Markdown 校对稿、分块及 embedding 建库。
 修改校对稿后运行同一入口即可导回并更新知识库。完整说明和模型取舍见 [LAB.md](docs/LAB.md)。
 
 从带时间戳的转录稿中检索可追溯原文，为现有聊天工作台提供上下文。处理链为：句子语义与时间窗分块 → Ollama 原文增强 → 原文 Dense + 问题辅助 BM25 → RRF → cross-encoder → FastAPI。

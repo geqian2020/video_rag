@@ -15,10 +15,20 @@
 
 Windows 的 dedicated/shared 含义见 [Microsoft 说明](https://devblogs.microsoft.com/directx/gpus-in-the-task-manager/)，核显共享内存见 [Intel 说明](https://www.intel.com/content/www/us/en/support/articles/000020962/graphics.html)。
 
-默认选用 faster-whisper **medium**，CUDA 时尝试 INT8/FP16 混合计算，CPU 时使用 INT8。
-它替代旧入口默认的 small，但更大的模型能否改善当前领域术语，仍须用同一段音频人工对比。
+默认选用 faster-whisper **large-v3 多语言完整版**，CUDA 时尝试 INT8/FP16 混合计算，CPU 时使用 INT8。
+旧配置默认 small（244M 参数），最初的 lab 默认 medium（769M）；现在默认 large-v3（1550M）。
+本次优先识别质量。更大的模型能否改善当前领域术语和中英混说，仍须用同一段音频人工对比。
 CUDA 转录失败时明确记录错误并尝试同一模型的 CPU INT8；第二次失败就停止。
-不会把模型自动降到 small，也不会把失败伪装成转录完成。
+不会把模型自动降到 medium/small，也不会把失败伪装成转录完成。
+
+语言默认 `auto`，启用 faster-whisper 的 `multilingual=True` 解码窗口语言检测。
+任务固定为 `transcribe`，保留原语言；关闭上文文本继承，减少切换语言时被前一段输出带偏的机会。
+这里的检测粒度是解码窗口，并非每个词；当前外层音频窗口为 30 秒。
+原来已按 30 秒窗口自动检测，所以新增开关不意味着突然获得逐词语言识别能力。
+句内快速穿插英文、口音和专有名词仍可能识别错误；不承诺“模型变大即可解决中英混说”。
+领域术语可走现有的人工批准词表功能辅助识别，不能靠大模型按常识补写原话。
+模型信息见 [Whisper large-v3](https://huggingface.co/openai/whisper-large-v3)，
+语言检测参数见 [faster-whisper v1.2.1 源码](https://github.com/SYSTRAN/faster-whisper/blob/v1.2.1/faster_whisper/transcribe.py)。
 
 Embedding 沿用 **BAAI/bge-m3**，重排沿用 **BAAI/bge-reranker-v2-m3**。
 这两个模型默认在 CPU 上运行（batch size 8，embedding 上限 1024 tokens），保留 T400 的显存给转录。
@@ -27,7 +37,7 @@ ASR、分块、建库分进程顺序运行，阶段结束后释放模型。
 检索沿用 Dense + BM25 → RRF → cross-encoder，并在重排选中后扩展前后 15 秒证据。
 
 32GB 内存提高了 CPU 运行和建库的余量，**没有把 T400 的独立显存提高到 20GB**。
-large-v3 是可选实验：不承诺 4GB 显卡必定能放下或达到某个速度。
+large-v3 现在是默认质量方案：不承诺 4GB 显卡必定能放下或达到某个速度；CPU 后备可能明显更慢。
 [faster-whisper 官方基准](https://github.com/SYSTRAN/faster-whisper#benchmark)的显存数字来自其他硬件及特定参数，不能当作本机实测。
 先稳定完成转录并抽查，再比较大模型和检索指标，仍是本项目的推进顺序。
 
@@ -79,7 +89,7 @@ OneDrive 仅联机媒体在打开时可能由 Windows 自动下载；本入口�
 |---|---|
 | `config.json` | 此输入的配置（JSON 同时是合法 YAML） |
 | `videos.json` | 当前输入的视频清单 |
-| `transcripts/` | 原始 JSONL、质量日志、逐窗口断点及每视频一份完整 `.review.md` |
+| `transcripts/<模型-语言-策略>/` | 原始 JSONL、质量日志、逐窗口断点及每视频一份完整 `.review.md` |
 | `corrected/` | 按校对内容哈希保存的校正版 JSONL，各版保留 |
 | `effective-transcripts.jsonl` | 本次实际用于分块的全部视频正文 |
 | `chunks.jsonl` / `enriched.jsonl` | 分块及原文摘录结果 |
@@ -119,14 +129,17 @@ bash run_lab.sh --search
 bash run_lab.sh --serve
 ```
 
-可选对比 large-v3（仅实验，不是必改项）：
+默认已经使用 large-v3，无需额外指定模型。需要主动对比较小的 medium 时才运行：
 
 ```bash
-LAB_ASR_MODEL=large-v3 bash run_lab.sh
+LAB_ASR_MODEL=medium bash run_lab.sh
 ```
 
-语言默认自动检测；如果视频语言固定，可选择 `LAB_LANGUAGE=en` 或 `LAB_LANGUAGE=zh` 后运行。
-模型或语言改变会重新转录；已有校对稿仍保留，若不再匹配原始 JSONL，导回会停止，请先备份校对稿并重新导出迁移。
+语言默认自动检测，并启用窗口语言检测；指定 `LAB_LANGUAGE=en` 或 `LAB_LANGUAGE=zh` 会固定语言并关闭窗口语言切换。
+中英混说先用默认方案抽查；以中文为主、穿插英文术语的录音也可另行对比 `LAB_LANGUAGE=zh`，以实际结果为准。
+模型或语言策略改变时，原始转录、断点和校对稿分别保存到独立子目录，例如 `transcripts/large-v3-auto-mixed-v1/`。
+升级前平铺在 `transcripts/` 下的原稿与人工校对内容保留，不自动套到新模型结果上。
+如果同一模型策略下的源媒体改变，旧校对稿不再匹配原始 JSONL 时仍会拒绝导回，请重新导出并迁移校对内容。
 断点和缓存只证明处理步骤已完成，**不证明转录准确或检索召回率达到 95%**。
 
 ## 验证范围

@@ -24,6 +24,7 @@ class FasterWhisperAdapter:
     def transcribe(self, audio, **kwargs):
         segments, _ = self.model.transcribe(
             audio, language=None if kwargs['language'] == 'auto' else kwargs['language'], task='transcribe',
+            multilingual=self.cfg.asr.multilingual and kwargs['language'] == 'auto',
             beam_size=self.cfg.asr.beam_size, temperature=0.0,
             condition_on_previous_text=False, initial_prompt=kwargs.get('initial_prompt'),
             word_timestamps=False, vad_filter=False,

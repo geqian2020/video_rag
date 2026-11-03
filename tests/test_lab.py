@@ -106,6 +106,11 @@ def test_faster_audio_windows_resume_and_detect_media_change(tmp_path, monkeypat
     cfg.asr.compute_type = 'float32'
     run.transcribe_video(source, 'v', Vocabulary(), cfg, model, len, output)
     assert model.calls == 9
+    cfg.asr.multilingual = True
+    run.transcribe_video(source, 'v', Vocabulary(), cfg, model, len, output)
+    assert model.calls == 12
+    audit = json.loads(Path(str(output) + '.audit.json').read_text())
+    assert audit['multilingual'] is True and audit['backend'] == 'faster-whisper'
 
 
 def test_complete_asr_reuses_output_without_model_loading(tmp_path, monkeypatch):
@@ -160,3 +165,64 @@ def test_real_audio_decode_with_lab_dependencies(tmp_path):
     assert samples.shape == (16000,)
     assert samples.dtype == np.float32
     assert not np.any(samples)
+
+
+def test_default_quality_profile_and_explicit_medium(monkeypatch):
+    monkeypatch.delenv('LAB_ASR_MODEL', raising=False)
+    assert lab.chosen_asr_model() == 'large-v3'
+    monkeypatch.setenv('LAB_ASR_MODEL', 'medium')
+    assert lab.chosen_asr_model() == 'medium'
+    monkeypatch.setenv('LAB_ASR_MODEL', 'medium.en')
+    with pytest.raises(ValueError):
+        lab.chosen_asr_model()
+
+
+def test_model_profiles_keep_previous_human_reviews(tmp_path):
+    source = tmp_path / 'video.mp4'
+    source.write_bytes(b'media')
+    cfg = Settings()
+    cfg.asr.language, cfg.asr.multilingual = 'auto', True
+    folder = tmp_path / 'output'
+    old = lab.manifest_for(source, [source], folder)[0]
+    old_review = Path(old['output']).with_suffix('.review.md')
+    old_review.parent.mkdir(parents=True)
+    old_review.write_text('Previously corrected by a human.')
+    large = lab.manifest_for(source, [source], folder, lab.asr_profile('large-v3', cfg))[0]
+    medium = lab.manifest_for(source, [source], folder, lab.asr_profile('medium', cfg))[0]
+    cfg.asr.language, cfg.asr.multilingual = 'zh', False
+    fixed = lab.manifest_for(source, [source], folder, lab.asr_profile('large-v3', cfg))[0]
+    assert len({x['output'] for x in (old, large, medium, fixed)}) == 4
+    assert old_review.read_text() == 'Previously corrected by a human.'
+    assert 'large-v3-auto-mixed-v1' in large['output']
+
+
+@pytest.mark.parametrize('language, expected_multilingual', [('auto', True), ('zh', False), ('en', False)])
+def test_large_model_config_language_policy(tmp_path, monkeypatch, language, expected_multilingual):
+    monkeypatch.setitem(sys.modules, 'torch', SimpleNamespace(cuda=SimpleNamespace(is_available=lambda: False)))
+    monkeypatch.setenv('LAB_LANGUAGE', language)
+    cfg = lab.make_config(tmp_path, {'asr': 'local-large-v3', 'embedding': 'bge', 'reranker': 'reranker'})
+    assert cfg.asr.model == 'local-large-v3'
+    assert cfg.asr.device == 'cpu' and cfg.asr.compute_type == 'int8'
+    assert cfg.asr.language == language and cfg.asr.multilingual is expected_multilingual
+
+
+@pytest.mark.parametrize('language, multilingual', [('auto', True), ('zh', False)])
+def test_faster_adapter_preserves_original_language_and_disables_history(language, multilingual):
+    from transcribe.faster import FasterWhisperAdapter
+    cfg = Settings()
+    cfg.asr.multilingual = True
+    adapter = FasterWhisperAdapter.__new__(FasterWhisperAdapter)
+    adapter.cfg = cfg
+    called = {}
+    def transcribe(audio, **kwargs):
+        called.update(kwargs)
+        segment = SimpleNamespace(start=0, end=2, text='先做 calibration 再 verification。',
+                                  compression_ratio=1, avg_logprob=0, no_speech_prob=0)
+        return iter([segment]), None
+    adapter.model = SimpleNamespace(transcribe=transcribe)
+    result = adapter.transcribe(np.zeros(16000), language=language)
+    assert called['task'] == 'transcribe'
+    assert called['multilingual'] is multilingual
+    assert called['language'] == (None if language == 'auto' else language)
+    assert called['condition_on_previous_text'] is False
+    assert result['segments'][0]['text'] == '先做 calibration 再 verification。'
